@@ -1,0 +1,62 @@
+[
+  {
+    "query": "신구대 본관",
+    "bld_name": "신구대학교 본관(우촌관)",
+    "floors": 7,
+    "pts": 25
+  },
+  {
+    "query": "신구대 국제관",
+    "bld_name": "신구대학교 국제관",
+    "floors": 8,
+    "pts": 9
+  },
+  {
+    "query": "신구대 산학협력관",
+    "bld_name": "신구대학교 산학협력관",
+    "floors": 4,
+    "pts": 13
+  },
+  {
+    "query": "신구대 남관",
+    "bld_name": "신구대학교 남관",
+    "floors": 5,
+    "pts": 13
+  },
+  {
+    "query": "신구대 창업관",
+    "bld_name": "신구대학교 창업관",
+    "floors": 4,
+    "pts": 19
+  },
+  {
+    "query": "신구대 부속유치원",
+    "bld_name": "신구대학교 부속유치원",
+    "floors": 3,
+    "pts": 5
+  },
+  {
+    "query": "신구대 동관",
+    "bld_name": "신구대학교 동관",
+    "floors": 5,
+    "pts": 13
+  },
+  {
+    "query": "신구대 복지관",
+    "bld_name": "신구대학교 복지관",
+    "floors": 4,
+    "pts": 9
+  },
+  {
+    "query": "신구대 체육관",
+    "bld_name": "신구대학교 체육관",
+    "floors": 3,
+    "pts": 17
+  },
+  {
+    "query": "신구대 기숙사",
+    "bld_name": "신구대학교 기숙사(생활관)",
+    "floors": 10,
+    "pts": 10
+  }
+]
