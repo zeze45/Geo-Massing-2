@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.env
+cloudflared.exe
+backend_복사
+*.bat
+backend/scratch_*
+backend/test_*
+backend/*.png
+backend/*.svg
