@@ -1,0 +1,151 @@
+/* styles.css - 미래지향적 공간정보 및 AR HUD 스타일 */
+
+@import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&family=Rajdhani:wght@500;600;700&display=swap');
+
+:root {
+  --neon-cyan: #00f0ff;
+  --neon-blue: #0070f3;
+  --neon-green: #00ff88;
+  --neon-amber: #ffb700;
+  --bg-dark: #0a0e17;
+  --panel-bg: rgba(13, 22, 38, 0.88);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background-color: var(--bg-dark);
+  color: #f1f5f9;
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.font-tech {
+  font-family: 'Rajdhani', sans-serif;
+  letter-spacing: 0.05em;
+}
+
+/* 필수 유틸리티 */
+.hidden {
+  display: none !important;
+}
+
+/* 글래스모피즘 HUD */
+.glass-panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* 3D 뷰포트 및 캔버스 */
+#ar-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 1;
+}
+
+#map-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  background-color: #0f172a;
+}
+
+#report-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  background-color: #090d16;
+}
+
+#camera-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+  display: none;
+}
+
+#three-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  touch-action: none;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+#three-canvas:active {
+  cursor: grabbing;
+}
+
+/* 음성 파형 애니메이션 */
+.wave-bar {
+  width: 4px;
+  height: 8px;
+  background-color: var(--neon-cyan);
+  border-radius: 2px;
+  transition: height 0.15s ease;
+}
+
+.speaking .wave-bar:nth-child(1) { animation: wave 0.8s infinite 0.1s; }
+.speaking .wave-bar:nth-child(2) { animation: wave 0.8s infinite 0.3s; }
+.speaking .wave-bar:nth-child(3) { animation: wave 0.8s infinite 0.2s; }
+.speaking .wave-bar:nth-child(4) { animation: wave 0.8s infinite 0.4s; }
+.speaking .wave-bar:nth-child(5) { animation: wave 0.8s infinite 0.15s; }
+
+@keyframes wave {
+  0%, 100% { height: 6px; }
+  50% { height: 26px; background-color: var(--neon-green); }
+}
+
+/* 슬라이더 커스텀 (모바일 공간 확보 및 콤팩트 최적화) */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.15);
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  cursor: pointer;
+  box-shadow: 0 0 6px var(--neon-cyan);
+  border: 1.5px solid #ffffff;
+}

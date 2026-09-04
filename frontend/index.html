@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Geo-Massing Simulator | 공간정보 & 3D 건축 법규 시뮬레이터</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  
+  <!-- Local Three.js Library -->
+  <script src="libs/three.min.js"></script>
+
+  <!-- Leaflet 2D Cadastral Map Library -->
+  <link rel="stylesheet" href="libs/leaflet.css" />
+  <script src="libs/leaflet.js"></script>
+  
+  <!-- Custom Styles with Cache-Buster -->
+  <link rel="stylesheet" href="css/styles.css?v=20260904_24" />
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col h-full w-full overflow-hidden select-none">
+
+  <!-- HTTPS 권장 배너 -->
+  <div id="https-warning-banner" class="hidden bg-amber-500/20 border-b border-amber-500/40 text-amber-300 text-xs px-3 py-2 flex items-center justify-between z-40">
+    <div class="flex items-center gap-1.5 truncate">
+      <i class="fas fa-triangle-exclamation"></i>
+      <span class="truncate">카메라 AR 모드를 사용하려면 <b>https://</b> 주소로 접속해 주세요</span>
+    </div>
+    <button onclick="document.getElementById('https-warning-banner').remove()" class="text-amber-300 hover:text-white ml-2 shrink-0 cursor-pointer">
+      <i class="fas fa-xmark"></i>
+    </button>
+  </div>
+
+  <!-- 1. 최상단 네비게이션 헤더 -->
+  <header class="h-14 glass-panel border-b border-cyan-500/30 flex items-center justify-between px-3 md:px-6 z-30 shrink-0 gap-2">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 shrink-0">
+        <i class="fas fa-cube text-slate-950 text-lg"></i>
+      </div>
+      <div class="hidden sm:block">
+        <h1 class="text-sm md:text-base font-extrabold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-300">
+          Geo-Massing <span class="text-xs bg-cyan-950/80 text-cyan-400 px-1.5 py-0.5 rounded border border-cyan-500/40 ml-1">Simulator</span>
+        </h1>
+        <p class="text-[10px] text-slate-400">공간정보 지적 & 3D 건축 법규 시뮬레이터</p>
+      </div>
+    </div>
+
+    <!-- 주소/지번 정밀 검색창 -->
+    <div class="flex items-center bg-slate-900/90 rounded-xl px-2.5 py-1.5 border border-cyan-500/40 shadow-inner max-w-[280px] w-full">
+      <input type="text" id="input-address-search" onkeydown="if(event.key==='Enter') window.app.searchAndGoAddress()" placeholder="📍 주소 또는 지번 검색" class="bg-transparent text-cyan-300 placeholder-slate-500 focus:outline-none w-full text-xs" />
+      <button onclick="window.app.searchAndGoAddress()" class="text-cyan-400 hover:text-cyan-200 p-0.5 ml-1 cursor-pointer" title="주소 검색">
+        <i class="fas fa-search text-xs"></i>
+      </button>
+    </div>
+
+    <!-- 핵심 모드 전환 듀얼 스위치 (중앙) -->
+    <div class="hidden md:flex items-center bg-slate-900/90 p-1 rounded-xl border border-cyan-500/40 shadow-inner w-56">
+      <button id="mode-btn-location" onclick="window.app.setInteractionMode('location')" class="flex-1 py-1.5 px-3 rounded-lg text-xs font-bold bg-cyan-500 text-slate-950 shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+        <i class="fas fa-location-dot"></i> 위치기반 3D
+      </button>
+      <button id="mode-btn-camera" onclick="window.app.setInteractionMode('camera_ar')" class="flex-1 py-1.5 px-3 rounded-lg text-xs font-medium text-slate-400 hover:text-cyan-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+        <i class="fas fa-camera"></i> 카메라 AR
+      </button>
+    </div>
+
+    <!-- 우측 설정 & 로딩 표시기 -->
+    <div class="flex items-center gap-1.5">
+      <div id="loading-badge" class="hidden px-2 py-1 rounded bg-cyan-950/80 border border-cyan-500/40 text-[10px] text-cyan-300 flex items-center gap-1 animate-pulse">
+        <i class="fas fa-spinner fa-spin"></i> 분석 중
+      </div>
+      <button onclick="document.getElementById('vworld-modal').classList.remove('hidden'); document.getElementById('vworld-modal').classList.add('flex');" class="p-2 text-xs rounded-lg glass-panel border border-slate-700 hover:border-cyan-500/40 text-slate-400 hover:text-cyan-300 transition-all shadow-sm cursor-pointer" title="config.json 연동 상태">
+        <i class="fas fa-gear text-sm"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- 모바일용 모드 전환 스위치 (소형 화면 대응) -->
+  <div class="flex md:hidden items-center bg-slate-900/90 p-1 border-b border-cyan-500/20 px-3 py-1">
+    <button id="mobile-mode-btn-location" onclick="window.app.setInteractionMode('location')" class="flex-1 py-1 px-2 rounded text-xs font-bold bg-cyan-500 text-slate-950 transition-all flex items-center justify-center gap-1 cursor-pointer">
+      <i class="fas fa-location-dot"></i> 위치기반 3D
+    </button>
+    <button id="mobile-mode-btn-camera" onclick="window.app.setInteractionMode('camera_ar')" class="flex-1 py-1 px-2 rounded text-xs font-medium text-slate-400 hover:text-cyan-300 transition-all flex items-center justify-center gap-1 cursor-pointer">
+      <i class="fas fa-camera"></i> 카메라 AR
+    </button>
+  </div>
+
+  <!-- 2. 지적 필지 정밀 주소 HUD 서브헤더 -->
+  <div class="glass-panel px-3 md:px-6 py-2 border-b border-cyan-500/20 flex flex-wrap items-center justify-between gap-2 z-20 shrink-0 text-xs">
+    <div class="flex items-center gap-2 min-w-0">
+      <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0"></span>
+      <div class="min-w-0">
+        <span id="hud-parcel-title" class="font-bold text-slate-100 truncate block text-xs md:text-sm">신구대학교 본관(우촌관·도서관)</span>
+        <span id="hud-parcel-address" class="text-cyan-300 text-[11px] font-semibold truncate block">경기도 성남시 중원구 광명로 377 (금광동 2685)</span>
+      </div>
+    </div>
+    
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <span id="badge-zoning" class="px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-300 border border-blue-500/40 font-semibold text-[11px]">
+        제2종일반주거지역
+      </span>
+      <span id="badge-jimok" class="px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 font-semibold text-[11px]">
+        대지 (대)
+      </span>
+      <span id="badge-area" class="px-2 py-0.5 rounded-full bg-slate-800 text-cyan-300 border border-slate-600 font-semibold text-[11px]">
+        316 ㎡
+      </span>
+      <span id="badge-gis" class="px-2 py-0.5 rounded-full bg-purple-950/80 text-purple-300 border border-purple-500/40 font-semibold text-[11px] hidden">
+        <i class="fas fa-draw-polygon text-purple-400"></i> 실측 GIS 연동
+      </span>
+    </div>
+  </div>
+
+  <!-- 3. 메인 뷰포트 영역 (2D 공간 지도 & 3D 정밀 건물 볼륨) -->
+  <main class="relative flex-1 w-full h-full overflow-hidden bg-slate-950">
+    
+    <!-- (1) 3D 지적 매싱 / AR 뷰어 컨테이너 -->
+    <div id="ar-container" class="absolute inset-0 w-full h-full">
+      <video id="camera-video" playsinline autoplay muted></video>
+      <canvas id="three-canvas"></canvas>
+
+      <!-- 스캔 플래시 이펙트 -->
+      <div id="ar-scan-flash" class="absolute inset-0 bg-cyan-400/30 backdrop-blur-sm z-30 hidden transition-opacity pointer-events-none"></div>
+
+      <!-- 카메라 AR 모드 조준선 & 스캔 컨트롤 -->
+      <div id="camera-ar-controls" class="absolute inset-0 hidden pointer-events-none z-20 flex flex-col justify-between p-4">
+        <div class="flex-1 flex items-center justify-center">
+          <div class="w-52 h-52 sm:w-64 sm:h-64 border-2 border-cyan-400/70 rounded-3xl relative flex items-center justify-center shadow-[0_0_25px_rgba(0,240,255,0.35)]">
+            <div class="w-3 h-3 bg-cyan-400 rounded-full animate-ping"></div>
+            <div class="w-1.5 h-1.5 bg-white rounded-full absolute"></div>
+            
+            <div class="absolute -top-1 -left-1 w-5 h-5 border-t-4 border-l-4 border-cyan-300"></div>
+            <div class="absolute -top-1 -right-1 w-5 h-5 border-t-4 border-r-4 border-cyan-300"></div>
+            <div class="absolute -bottom-1 -left-1 w-5 h-5 border-b-4 border-l-4 border-cyan-300"></div>
+            <div class="absolute -bottom-1 -right-1 w-5 h-5 border-b-4 border-r-4 border-cyan-300"></div>
+
+            <span class="absolute -bottom-7 text-[11px] font-bold bg-slate-950/90 text-cyan-300 px-3 py-1 rounded-full border border-cyan-500/50 shadow-lg whitespace-nowrap">
+              건물을 조준하고 아래 버튼을 터치하세요
+            </span>
+          </div>
+        </div>
+
+        <div class="pb-16 flex justify-center pointer-events-auto">
+          <button id="btn-ar-scan-building" onclick="window.app.scanTargetBuildingInAR()" class="px-6 py-3 rounded-full bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-extrabold text-sm shadow-[0_0_20px_rgba(0,240,255,0.6)] flex items-center gap-2 border border-cyan-200/50 active:scale-95 transition-all cursor-pointer">
+            <i class="fas fa-expand text-base text-cyan-200"></i>
+            <span id="btn-scan-text">🎯 비춘 건물 AI 스캔 & 분석</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 현장 스캔 결과 팝업 HUD 카드 -->
+      <div id="ar-scan-result-card" class="absolute bottom-20 left-4 right-4 md:left-auto md:right-4 md:w-96 glass-panel p-4 rounded-2xl border border-cyan-400/60 shadow-2xl z-30 hidden animate-fade-in">
+        <div class="flex justify-between items-start mb-2">
+          <div class="flex items-center gap-2 text-cyan-300 font-bold text-sm">
+            <i class="fas fa-bullseye"></i>
+            <span id="scan-card-title">🎯 현장 스캔 완료</span>
+          </div>
+          <button onclick="document.getElementById('ar-scan-result-card').classList.add('hidden')" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+            <i class="fas fa-xmark text-sm"></i>
+          </button>
+        </div>
+        <p id="scan-card-desc" class="text-xs text-slate-200 leading-relaxed mb-3">
+          스캔 데이터 분석 중...
+        </p>
+        <div class="grid grid-cols-4 gap-2 text-center bg-slate-950/70 p-2 rounded-xl border border-slate-800">
+          <div>
+            <p class="text-[9px] text-slate-400">건폐율</p>
+            <p id="scan-card-bcr" class="text-xs font-bold text-cyan-400">60%</p>
+          </div>
+          <div>
+            <p class="text-[9px] text-slate-400">용적률</p>
+            <p id="scan-card-far" class="text-xs font-bold text-blue-400">200%</p>
+          </div>
+          <div>
+            <p class="text-[9px] text-slate-400">시뮬 층수</p>
+            <p id="scan-card-floors" class="text-xs font-bold text-emerald-400">3F</p>
+          </div>
+          <div>
+            <p class="text-[9px] text-slate-400">일조사선</p>
+            <p id="scan-card-solar" class="text-[10px] font-bold text-amber-400">적용</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3D HUD 오버레이 메트릭스 카드 (좌측 상단) -->
+      <div class="absolute top-3 left-3 z-10 space-y-1.5 pointer-events-none">
+        <div class="glass-panel p-2 rounded-xl border border-cyan-500/30 backdrop-blur-md shadow-xl w-32 md:w-40">
+          <p class="text-[10px] text-slate-400 font-medium">시뮬레이션 층수</p>
+          <p id="metric-floors" class="text-xl md:text-2xl font-black text-cyan-300 font-tech">3F</p>
+        </div>
+        <div class="glass-panel p-2 rounded-xl border border-cyan-500/30 backdrop-blur-md shadow-xl w-32 md:w-40">
+          <p class="text-[10px] text-slate-400 font-medium">최고 높이</p>
+          <p id="metric-height" class="text-xl md:text-2xl font-black text-emerald-300 font-tech">9.6m</p>
+        </div>
+      </div>
+
+      <!-- 3D HUD 오버레이 메트릭스 카드 (우측 상단) -->
+      <div class="absolute top-3 right-3 z-10 space-y-1.5 pointer-events-none text-right">
+        <div class="glass-panel p-2 rounded-xl border border-cyan-500/30 backdrop-blur-md shadow-xl w-32 md:w-40">
+          <p class="text-[10px] text-slate-400 font-medium">최대 건축면적</p>
+          <p id="metric-bld-area" class="text-base md:text-lg font-black text-cyan-300 font-tech">189.6㎡</p>
+        </div>
+        <div class="glass-panel p-2 rounded-xl border border-cyan-500/30 backdrop-blur-md shadow-xl w-32 md:w-40">
+          <p class="text-[10px] text-slate-400 font-medium">최대 지상연면적</p>
+          <p id="metric-gross-area" class="text-base md:text-lg font-black text-blue-300 font-tech">474㎡</p>
+        </div>
+
+        <!-- 🗺️ 지도에서 건물 선택 플로팅 퀵 버튼 -->
+        <button onclick="window.app.switchMainTab('map_view')" class="pointer-events-auto px-3 py-1.5 rounded-xl glass-panel border border-cyan-400/50 bg-slate-900/90 hover:bg-cyan-950/80 text-cyan-300 text-xs font-bold shadow-lg flex items-center justify-end gap-1.5 active:scale-95 transition-all cursor-pointer float-right" title="지도에서 원하는 건물을 직접 클릭해 3D로 불러옵니다">
+          <i class="fas fa-map-marked-alt text-cyan-400"></i>
+          <span>지도에서 건물 선택</span>
+        </button>
+      </div>
+
+      <!-- 🔄 화면 위치 초기화 플로팅 버튼 (좌측 하단 - 아이콘 전용) -->
+      <button onclick="window.app.resetView()" class="absolute bottom-3 left-3 z-20 w-10 h-10 rounded-xl glass-panel border border-cyan-500/40 bg-slate-900/90 hover:bg-cyan-950/80 text-cyan-300 shadow-lg flex items-center justify-center active:scale-95 transition-all cursor-pointer" title="화면 위치 초기화">
+        <i class="fas fa-arrows-rotate text-cyan-400 text-sm"></i>
+      </button>
+
+      <!-- 📍 내 위치로 이동 (GPS) 플로팅 버튼 (우측 하단 - 아이콘 전용) -->
+      <button onclick="window.app.locateUser()" class="absolute bottom-3 right-3 z-20 w-10 h-10 rounded-xl glass-panel border border-cyan-500/40 bg-slate-900/90 hover:bg-cyan-950/80 text-cyan-300 shadow-lg flex items-center justify-center active:scale-95 transition-all cursor-pointer" title="현재 내 GPS 위치로 이동">
+        <i class="fas fa-crosshairs text-cyan-400 text-sm"></i>
+      </button>
+    </div>
+
+    <!-- (2) AI 종합 법규 보고서 컨테이너 -->
+    <div id="report-container" class="absolute inset-0 w-full h-full z-10 overflow-y-auto p-4 md:p-8 space-y-4 pb-28 hidden bg-slate-950">
+      <div class="max-w-4xl mx-auto space-y-4">
+        <!-- AI 총평 카드 -->
+        <div class="glass-panel p-5 rounded-2xl border border-cyan-500/40 bg-gradient-to-br from-slate-900/90 to-cyan-950/40 shadow-2xl">
+          <div class="flex items-center gap-2 mb-2 text-cyan-400">
+            <i class="fas fa-robot text-lg"></i>
+            <h3 class="font-bold text-base">AI 종합 개발 및 법규 적합성 진단</h3>
+          </div>
+          <p id="report-ai-eval" class="text-slate-200 text-sm leading-relaxed">
+            분석 리포트를 불러오는 중입니다...
+          </p>
+        </div>
+
+        <!-- 세부 항목 그리드 -->
+        <div id="report-sections-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+
+        <!-- 음성 브리핑 전문 스크립트 카드 -->
+        <div class="glass-panel p-4 rounded-xl border border-slate-700/60">
+          <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <i class="fas fa-file-lines text-cyan-400"></i> AI 음성 브리핑 전문 스크립트
+          </h4>
+          <p id="report-tts-preview" class="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800 font-mono">
+            -
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- (3) 2D 지적 및 공간정보 지도 뷰어 컨테이너 (클릭으로 건물 선택) -->
+    <div id="map-container" class="absolute inset-0 w-full h-full z-10 hidden">
+      <!-- 지도 우측 상단 3D 뷰어로 복귀 플로팅 퀵 버튼 -->
+      <button onclick="window.app.switchMainTab('3d_view')" class="absolute top-3 right-3 z-[1000] px-3 py-1.5 rounded-xl glass-panel border border-cyan-400/60 bg-slate-900/90 hover:bg-cyan-950/80 text-cyan-300 text-xs font-bold shadow-lg flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer" title="3D 뷰어로 복귀">
+        <i class="fas fa-cube text-cyan-400"></i>
+        <span>3D 뷰어로 돌아가기</span>
+      </button>
+    </div>
+
+  </main>
+
+  <!-- 4. 하단 조작 컨트롤러 & 슬라이더 패널 -->
+  <footer class="glass-panel border-t border-cyan-500/30 z-30 shrink-0 p-2 sm:p-2.5 flex flex-col gap-1.5">
+    
+    <!-- 실시간 법규 시뮬레이션 슬라이더 패널 (콤팩트 & 가로 3열 & 접기/펼치기 지원) -->
+    <div class="bg-slate-950/80 px-2.5 py-1.5 rounded-xl border border-slate-800/80 flex flex-col gap-1 shadow-md">
+      
+      <!-- 슬라이더 헤더 (토글 & 기준값 복원) -->
+      <div class="flex items-center justify-between text-[11px] sm:text-xs">
+        <button onclick="window.app.toggleSliderPanel()" class="text-slate-300 font-bold flex items-center gap-1.5 hover:text-cyan-300 cursor-pointer transition-colors" title="슬라이더 접기/펼치기">
+          <i id="slider-toggle-icon" class="fas fa-chevron-down text-cyan-400 text-[10px]"></i>
+          <span class="flex items-center gap-1"><i class="fas fa-sliders text-cyan-400 text-[10px]"></i> 법규 시뮬레이션</span>
+        </button>
+        <button id="btn-reset-sliders" onclick="window.app.resetSlidersToDefault()" class="px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 text-[10px] font-semibold flex items-center gap-1 transition-all active:scale-95 shadow-sm cursor-pointer" title="법정/조례 기준 수치로 되돌리기">
+          <i class="fas fa-rotate-left text-cyan-400 text-[9px]"></i> 기준값 복원
+        </button>
+      </div>
+
+      <!-- 슬라이더 그리드 (스마트폰에서도 가로 3열 콤팩트 배치) -->
+      <div id="slider-grid-content" class="grid grid-cols-3 gap-2 sm:gap-3 pt-1 border-t border-slate-800/60 transition-all">
+        <!-- 건폐율 -->
+        <div class="space-y-0.5">
+          <div class="flex justify-between font-semibold items-center text-[10px] sm:text-[11px]">
+            <span class="text-slate-400 truncate">건폐율 <span id="default-bcr-badge" class="text-[9px] text-slate-500 hidden sm:inline">(60%)</span></span>
+            <span id="val-bcr" class="text-cyan-400 font-tech font-bold text-xs sm:text-sm">60%</span>
+          </div>
+          <input type="range" id="slider-bcr" min="10" max="90" step="1" value="60" class="w-full" />
+        </div>
+
+        <!-- 용적률 -->
+        <div class="space-y-0.5">
+          <div class="flex justify-between font-semibold items-center text-[10px] sm:text-[11px]">
+            <span class="text-slate-400 truncate">용적률 <span id="default-far-badge" class="text-[9px] text-slate-500 hidden sm:inline">(150%)</span></span>
+            <span id="val-far" class="text-blue-400 font-tech font-bold text-xs sm:text-sm">150%</span>
+          </div>
+          <input type="range" id="slider-far" min="50" max="1500" step="10" value="150" class="w-full" />
+        </div>
+
+        <!-- 층고 -->
+        <div class="space-y-0.5">
+          <div class="flex justify-between font-semibold items-center text-[10px] sm:text-[11px]">
+            <span class="text-slate-400 truncate">층고</span>
+            <span id="val-floor-height" class="text-emerald-400 font-tech font-bold text-xs sm:text-sm">3.2m</span>
+          </div>
+          <input type="range" id="slider-floor-height" min="2.8" max="4.5" step="0.1" value="3.2" class="w-full" />
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 하단 탭 & 브리핑 버튼 (콤팩트 레이아웃) -->
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex rounded-lg bg-slate-900/90 p-0.5 border border-slate-800">
+        <button id="main-tab-3d" class="main-tab-btn px-2.5 py-1 rounded text-xs font-bold transition-all bg-cyan-500/20 border border-cyan-400 text-cyan-300 cursor-pointer" data-tab="3d_view" onclick="window.app.switchMainTab('3d_view')">
+          <i class="fas fa-cube mr-1"></i> 3D 뷰어
+        </button>
+        <button id="main-tab-report" class="main-tab-btn px-2.5 py-1 rounded text-xs font-medium text-slate-400 transition-all border border-transparent hover:text-cyan-300 cursor-pointer" data-tab="report" onclick="window.app.switchMainTab('report')">
+          <i class="fas fa-file-shield mr-1"></i> 법규 리포트
+        </button>
+      </div>
+
+      <button id="btn-voice-briefing" onclick="window.app.toggleVoice()" class="px-3 py-1.5 rounded-xl glass-panel border border-cyan-500/40 hover:border-cyan-400 bg-slate-900/80 text-cyan-300 font-bold text-xs flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer">
+        <i id="voice-icon" class="fas fa-volume-high text-cyan-400 text-sm"></i>
+        <span id="voice-btn-text">AI 브리핑</span>
+        <div id="voice-wave-container" class="flex items-center gap-0.5 h-3.5">
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+        </div>
+      </button>
+    </div>
+
+  </footer>
+
+  <!-- 5. config.json 연동 상태 모달 -->
+  <div id="vworld-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 hidden items-center justify-center p-4">
+    <div class="glass-panel p-6 rounded-2xl border border-cyan-500/40 max-w-md w-full shadow-2xl space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-bold text-base text-cyan-300 flex items-center gap-2">
+          <i class="fas fa-file-code"></i> API 키 연동 상태 (config.json)
+        </h3>
+        <button onclick="document.getElementById('vworld-modal').classList.add('hidden'); document.getElementById('vworld-modal').classList.remove('flex');" class="text-slate-400 hover:text-white cursor-pointer">
+          <i class="fas fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="text-xs text-slate-300 leading-relaxed space-y-2">
+        <p><b>📁 C:\AntiGravity\config.json 파일 자동 감지:</b></p>
+        <div class="bg-slate-900 p-2.5 rounded-lg border border-slate-800 font-mono text-[11px] text-cyan-300">
+          C:\AntiGravity\config.json
+        </div>
+        <p>입력해주신 V-World 및 공공데이터 키가 백엔드에 감지되었습니다.</p>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="document.getElementById('vworld-modal').classList.add('hidden'); document.getElementById('vworld-modal').classList.remove('flex');" class="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold rounded-lg text-xs shadow-lg cursor-pointer">
+          확인
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts with Cache-Busters -->
+  <script src="js/speech.js?v=20260904_24"></script>
+  <script src="js/map.js?v=20260904_24"></script>
+  <script src="js/ar_viewer.js?v=20260904_24"></script>
+  <script src="js/app.js?v=20260904_24"></script>
+</body>
+</html>
