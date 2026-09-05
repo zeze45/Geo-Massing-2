@@ -8,7 +8,6 @@ class App {
     this.speech = window.aiSpeechAgent;
     this.currentData = null;
     this.activeTab = '3d_view'; // '3d_view' | 'report'
-    this.currentMode = 'location'; // 'location' | 'camera_ar'
     this.defaultMetrics = null;
     this.sliderTimer = null;
     this.scanCount = 0;
@@ -32,10 +31,9 @@ class App {
       console.warn("Config load error:", e);
     }
 
-    // 1. 3D AR 뷰어 초기화
-    this.viewer = new CadastralARViewer('three-canvas', 'camera-video');
+    // 1. 3D 뷰어 초기화
+    this.viewer = new CadastralARViewer('three-canvas');
     this.viewer.init();
-    this.viewer.setMode('location');
 
     // 2. TTS 상태 콜백 바인딩
     if (this.speech) {
@@ -321,66 +319,6 @@ class App {
     }
   }
 
-  // ★ 카메라로 비춘 건물 AI 스캔
-  async scanTargetBuildingInAR() {
-    const scanBtn = document.getElementById('btn-ar-scan-building');
-    const scanCard = document.getElementById('ar-scan-result-card');
-    const scanFlash = document.getElementById('ar-scan-flash');
-    const scanText = document.getElementById('btn-scan-text');
-
-    this.scanCount += 1;
-
-    if (scanBtn) {
-      scanBtn.disabled = true;
-      if (scanText) scanText.textContent = 'AI 비전 및 공간정보 스캔 중...';
-    }
-
-    if (scanFlash) {
-      scanFlash.classList.remove('hidden');
-      setTimeout(() => scanFlash.classList.add('hidden'), 400);
-    }
-
-    try {
-      await this.handleLocationSelect(this.lastLat, this.lastLng, false, this.scanCount);
-
-      if (this.currentData) {
-        const legal = this.currentData.legal_metrics;
-        const massing = this.currentData.massing_3d;
-        const bld = massing.massing_building;
-        const parcel = this.currentData.parcel;
-
-        const titleEl = document.getElementById('scan-card-title');
-        const descEl = document.getElementById('scan-card-desc');
-        const bcrEl = document.getElementById('scan-card-bcr');
-        const farEl = document.getElementById('scan-card-far');
-        const floorsEl = document.getElementById('scan-card-floors');
-        const solarEl = document.getElementById('scan-card-solar');
-
-        if (titleEl) titleEl.textContent = `🎯 현장 스캔 완료: [${legal.zoning_name}]`;
-        if (descEl) descEl.textContent = 
-          `카메라 분석 결과, 대상 필지(${parcel.address})는 ${legal.zoning_name}으로 법정 건폐율 ${legal.applied_bcr}%, 용적률 ${legal.applied_far}%가 적용된 지상 ${bld.floors_count}층(높이 ${bld.total_height_m}m)의 건축 볼륨이 탐색되었습니다.`;
-        if (bcrEl) bcrEl.textContent = `${legal.applied_bcr}%`;
-        if (farEl) farEl.textContent = `${legal.applied_far}%`;
-        if (floorsEl) floorsEl.textContent = `${bld.floors_count}F`;
-        if (solarEl) solarEl.textContent = legal.solar_setback.applied ? '적용 (북측 단차)' : '완화';
-
-        if (scanCard) scanCard.classList.remove('hidden');
-
-        if (this.speech) {
-          const ttsMessage = `스캔 결과, 조준된 필지는 ${parcel.address}로 용도지역 ${legal.zoning_name}에 해당하여 지상 최대 ${bld.floors_count}층까지 가상 건축이 가능합니다.`;
-          this.speech.speak(ttsMessage);
-        }
-      }
-    } catch (err) {
-      console.error("AR Scan error:", err);
-    } finally {
-      if (scanBtn) {
-        scanBtn.disabled = false;
-        if (scanText) scanText.textContent = '🎯 비춘 건물 AI 스캔 & 분석';
-      }
-    }
-  }
-
   // ★ 화면 뷰/카메라 위치 초기화 핸들러
   resetView() {
     if (this.viewer) {
@@ -557,33 +495,6 @@ class App {
 
     const ttsPrev = document.getElementById('report-tts-preview');
     if (ttsPrev) ttsPrev.textContent = ai_report.tts_script;
-  }
-
-  setInteractionMode(mode) {
-    this.currentMode = mode;
-    this.viewer.setMode(mode);
-
-    const btnLocation = document.getElementById('mode-btn-location');
-    const btnCamera = document.getElementById('mode-btn-camera');
-    const mBtnLocation = document.getElementById('mobile-mode-btn-location');
-    const mBtnCamera = document.getElementById('mobile-mode-btn-camera');
-    const scanCard = document.getElementById('ar-scan-result-card');
-
-    if (scanCard) scanCard.classList.add('hidden');
-
-    if (mode === 'location') {
-      if (btnLocation) btnLocation.className = 'flex-1 py-1.5 px-3 rounded-lg text-xs font-bold bg-cyan-500 text-slate-950 shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer';
-      if (btnCamera) btnCamera.className = 'flex-1 py-1.5 px-3 rounded-lg text-xs font-medium text-slate-400 hover:text-cyan-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer';
-      if (mBtnLocation) mBtnLocation.className = 'flex-1 py-1 px-2 rounded text-xs font-bold bg-cyan-500 text-slate-950 transition-all flex items-center justify-center gap-1 cursor-pointer';
-      if (mBtnCamera) mBtnCamera.className = 'flex-1 py-1 px-2 rounded text-xs font-medium text-slate-400 hover:text-cyan-300 transition-all flex items-center justify-center gap-1 cursor-pointer';
-    } else {
-      if (btnCamera) btnCamera.className = 'flex-1 py-1.5 px-3 rounded-lg text-xs font-bold bg-gradient-to-r from-cyan-400 to-blue-500 text-slate-950 shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer';
-      if (btnLocation) btnLocation.className = 'flex-1 py-1.5 px-3 rounded-lg text-xs font-medium text-slate-400 hover:text-cyan-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer';
-      if (mBtnCamera) mBtnCamera.className = 'flex-1 py-1 px-2 rounded text-xs font-bold bg-gradient-to-r from-cyan-400 to-blue-500 text-slate-950 transition-all flex items-center justify-center gap-1 cursor-pointer';
-      if (mBtnLocation) mBtnLocation.className = 'flex-1 py-1 px-2 rounded text-xs font-medium text-slate-400 hover:text-cyan-300 transition-all flex items-center justify-center gap-1 cursor-pointer';
-    }
-
-    this.switchMainTab('3d_view');
   }
 
   bindSliderEvents() {

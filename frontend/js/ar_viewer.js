@@ -3,9 +3,8 @@
  */
 
 class CadastralARViewer {
-  constructor(canvasId, videoId) {
+  constructor(canvasId) {
     this.canvas = document.getElementById(canvasId);
-    this.video = document.getElementById(videoId);
     this.scene = null;
     this.camera = null;
     this.renderer = null;
@@ -13,8 +12,6 @@ class CadastralARViewer {
     this.groundGroup = new THREE.Group();
     this.mapGroundGroup = new THREE.Group();
     this.hudGroup = new THREE.Group();
-    this.currentMode = 'location';
-    this.cameraStream = null;
     this.currentMassingData = null;
     this.currentLegalMetrics = null;
 
@@ -93,57 +90,6 @@ class CadastralARViewer {
 
     // 7. 렌더 루프
     this.animate();
-  }
-
-  setMode(mode) {
-    this.currentMode = mode;
-    const arControls = document.getElementById('camera-ar-controls');
-
-    if (mode === 'camera_ar') {
-      this.mapGroundGroup.visible = false;
-      if (arControls) arControls.classList.remove('hidden');
-      this.startCamera();
-    } else {
-      if (arControls) arControls.classList.add('hidden');
-      this.stopCamera();
-      this.mapGroundGroup.visible = true;
-    }
-  }
-
-  async startCamera() {
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("HTTPS 연결 필요");
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      });
-
-      this.cameraStream = stream;
-      this.video.srcObject = stream;
-      this.video.setAttribute('playsinline', 'true');
-      await this.video.play();
-      this.video.style.display = 'block';
-      return true;
-    } catch (err) {
-      console.warn("Camera start error:", err);
-      this.video.style.display = 'none';
-      return false;
-    }
-  }
-
-  stopCamera() {
-    if (this.cameraStream) {
-      this.cameraStream.getTracks().forEach(track => track.stop());
-      this.cameraStream = null;
-    }
-    this.video.style.display = 'none';
   }
 
   updateMassing(massingData, legalMetrics, lat = 37.448919, lng = 127.167702) {
