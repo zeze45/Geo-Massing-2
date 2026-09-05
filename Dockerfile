@@ -20,5 +20,5 @@ RUN find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
 EXPOSE 8080
 
-# Cloud Run 표준 무결점 실행 명령어 (단일 프로세스 고속 비동기 서빙)
-CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Cloud Run 동적 PORT 환경변수 완벽 호환 단일 프로세스 실행
+CMD ["sh", "-c", "python -m uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
