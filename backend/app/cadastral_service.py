@@ -6,7 +6,7 @@ cadastral_service.py
 import math
 import re
 import requests
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple, Union
 from shapely.geometry import Polygon, Point, shape
 from .config_loader import load_config
 
