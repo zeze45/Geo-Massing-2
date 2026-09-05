@@ -20,5 +20,5 @@ RUN find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
 EXPOSE 8080
 
-# Google Cloud Run 공식 권장 프로덕션 실행 방식 (Gunicorn + UvicornWorker)
-CMD exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 0 backend.app.main:app
+# Cloud Run 표준 무결점 실행 명령어 (단일 프로세스 고속 비동기 서빙)
+CMD ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
