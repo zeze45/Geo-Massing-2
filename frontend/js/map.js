@@ -31,7 +31,9 @@ class CadastralMap {
 
     this.map = L.map(this.containerId, {
       zoomControl: false,
-      attributionControl: false
+      attributionControl: false,
+      minZoom: 7,
+      maxZoom: 19
     }).setView([defaultLat, defaultLng], zoom);
 
     // 0. GPS 내 위치 버튼 (줌 컨트롤 상단 배치)
@@ -56,40 +58,47 @@ class CadastralMap {
     L.control.zoom({ position: 'bottomright' }).addTo(this.map);
 
     const vworldKey = window.vworldApiKey || "DEB860E4-52DC-35F3-9E68-664B22DF3592";
+    const currentHost = window.location.hostname;
+    const domainParam = (currentHost === '127.0.0.1' || !currentHost) ? 'localhost' : currentHost;
 
-    // 1. 기본 배경지도 (V-World Base)
+    // 1. 기본 배경지도 (V-World Base - 최대 19레벨)
     this.baseLayer = L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/Base/{z}/{y}/{x}.png`, {
+      minZoom: 7,
       maxZoom: 19,
+      maxNativeZoom: 19,
       errorTileUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
     }).addTo(this.map);
 
-    // 2. 항공/위성 영상지도 (V-World Satellite)
+    // 2. 항공/위성 영상지도 (V-World Satellite - 최대 19레벨)
     this.satelliteLayer = L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/Satellite/{z}/{y}/{x}.jpeg`, {
+      minZoom: 7,
       maxZoom: 19,
+      maxNativeZoom: 19,
       errorTileUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
     });
 
     // 3. 하이브리드 명칭/도로 레이어
     this.hybridLayer = L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/Hybrid/{z}/{y}/{x}.png`, {
+      minZoom: 7,
       maxZoom: 19,
+      maxNativeZoom: 19,
       zIndex: 5
     });
 
-    // 4. 국토교통부 V-World WMS 연속지적도(지적선 경계 레이어)
+    // 4. 국토교통부 V-World WMS 연속지적도 (지적선 경계 및 지번)
     this.cadastralLayer = L.tileLayer.wms('https://api.vworld.kr/req/wms', {
       service: 'WMS',
       version: '1.3.0',
       request: 'GetMap',
-      layers: 'lp_pa_cbnd_bubun',
-      styles: 'lp_pa_cbnd_bubun',
+      layers: 'lp_pa_cbnd_bubun,lp_pa_cbnd_bonbun',
+      styles: 'lp_pa_cbnd_bubun,lp_pa_cbnd_bonbun',
       format: 'image/png',
       transparent: true,
       crs: L.CRS.EPSG3857,
       key: vworldKey,
-      domain: window.location.hostname || 'localhost',
-      minZoom: 15,
+      domain: domainParam,
+      minZoom: 10,
       maxZoom: 19,
-      minNativeZoom: 18,
       maxNativeZoom: 19,
       opacity: 0.9,
       zIndex: 10
