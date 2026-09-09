@@ -78,8 +78,7 @@ class App {
     document.addEventListener('pointerdown', handleOutsideClick, true);
     document.addEventListener('click', handleOutsideClick, true);
 
-    // 3. 초기 기본 위치 로드 (신구대학교 부근)
-    await this.handleLocationSelect(this.lastLat, this.lastLng, false, false);
+    // 3. 지도 초기화 완료 (사용자가 지도 클릭 또는 주소 검색 시 필지 분석 시작)
   }
 
   // ★ 2D 지도 초기화 & 클릭 리스너 연결

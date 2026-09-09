@@ -32,7 +32,7 @@ class CadastralMap {
     this.map = L.map(this.containerId, {
       zoomControl: false,
       attributionControl: false,
-      minZoom: 7,
+      minZoom: 6,
       maxZoom: 19
     }).setView([defaultLat, defaultLng], zoom);
 
@@ -63,7 +63,7 @@ class CadastralMap {
 
     // 1. 기본 배경지도 (V-World Base - 최대 19레벨)
     this.baseLayer = L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/Base/{z}/{y}/{x}.png`, {
-      minZoom: 7,
+      minZoom: 6,
       maxZoom: 19,
       maxNativeZoom: 19,
       errorTileUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
@@ -71,7 +71,7 @@ class CadastralMap {
 
     // 2. 항공/위성 영상지도 (V-World Satellite - 최대 19레벨)
     this.satelliteLayer = L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/Satellite/{z}/{y}/{x}.jpeg`, {
-      minZoom: 7,
+      minZoom: 6,
       maxZoom: 19,
       maxNativeZoom: 19,
       errorTileUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -79,25 +79,28 @@ class CadastralMap {
 
     // 3. 하이브리드 명칭/도로 레이어
     this.hybridLayer = L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/Hybrid/{z}/{y}/{x}.png`, {
-      minZoom: 7,
+      minZoom: 6,
       maxZoom: 19,
       maxNativeZoom: 19,
       zIndex: 5
     });
 
-    // 4. 국토교통부 V-World WMS 연속지적도 (지적선 경계 및 지번)
+    // 4. 국토교통부 V-World WMS 연속지적도 (지번 글씨 없이 깔끔한 지적경계선 전용 스타일)
+    // V-World WMS는 17레벨 이상에서 지적선을 제공하므로 minNativeZoom: 17을 설정하고,
+    // 너무 많이 줌아웃(광역/시도 단위)했을 때는 지적도가 깔끔하게 숨겨지도록 minZoom: 15로 제한 설정
     this.cadastralLayer = L.tileLayer.wms('https://api.vworld.kr/req/wms', {
       service: 'WMS',
       version: '1.3.0',
       request: 'GetMap',
       layers: 'lp_pa_cbnd_bubun,lp_pa_cbnd_bonbun',
-      styles: 'lp_pa_cbnd_bubun,lp_pa_cbnd_bonbun',
+      styles: 'lp_pa_cbnd_bubun_line,lp_pa_cbnd_bonbun_line',
       format: 'image/png',
       transparent: true,
       crs: L.CRS.EPSG3857,
       key: vworldKey,
       domain: domainParam,
-      minZoom: 10,
+      minZoom: 15,
+      minNativeZoom: 17,
       maxZoom: 19,
       maxNativeZoom: 19,
       opacity: 0.9,
@@ -313,7 +316,7 @@ class CadastralMap {
     };
   }
 
-  // ★ 필지 경계선 및 중앙 단일 지번 배지 렌더링
+  // ★ 필지 경계선 렌더링 및 선택된 필지 지번·지목 배지 표출
   updateParcel(polygonCoords, title = "선택된 지적 필지", centerLat, centerLng, shouldPan = false, parcelInfo = null) {
     if (!this.map || typeof L === 'undefined') return;
 
@@ -328,7 +331,7 @@ class CadastralMap {
     if (polygonCoords && polygonCoords.length > 2) {
       const latlngs = polygonCoords.map(pt => [pt[1], pt[0]]);
 
-      // 깔끔하고 자연스러운 단일 필지 외곽선 (기존 스타일로 복귀)
+      // 깔끔한 단일 필지 외곽선
       const polygon = L.polygon(latlngs, {
         color: '#00f0ff',
         weight: 3,
@@ -342,7 +345,7 @@ class CadastralMap {
       const badgeLat = centerLat || (centroid ? centroid[0] : latlngs[0][0]);
       const badgeLng = centerLng || (centroid ? centroid[1] : latlngs[0][1]);
 
-      // 클릭한 위치 바로 위에 단일 지번 배지 표출
+      // 클릭하여 선택한 필지 위치에만 단 1개의 지번·지목 배지 표출 (예: 2685 학)
       const lotData = this.extractLotNumber(parcelInfo, title);
       const centerBadgeIcon = L.divIcon({
         className: 'center-jibun-container',

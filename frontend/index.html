@@ -15,7 +15,7 @@
   <script src="libs/leaflet.js"></script>
   
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="css/styles.css?v=20260909_08" />
+  <link rel="stylesheet" href="css/styles.css?v=20260909_17" />
 </head>
 <body class="bg-slate-950 text-slate-100 flex flex-col h-full w-full overflow-hidden select-none">
 
@@ -59,21 +59,21 @@
       <div class="flex items-center gap-2 min-w-0">
         <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0"></span>
         <div class="min-w-0">
-          <span id="hud-parcel-title" class="font-bold text-slate-100 text-xs md:text-sm block">신구대학교</span>
-          <span id="hud-parcel-address" class="text-cyan-300 text-[11px] font-semibold block">경기도 성남시 중원구 광명로 377 (금광동 2685)</span>
+          <span id="hud-parcel-title" class="font-bold text-slate-100 text-xs md:text-sm block">지적 필지 선택 대기</span>
+          <span id="hud-parcel-address" class="text-cyan-300 text-[11px] font-semibold block">지도를 클릭하거나 주소를 검색하여 필지를 선택하세요</span>
         </div>
       </div>
 
       <!-- 배지 (용도지역, 지목, 면적) - 항상 노출 -->
       <div class="flex items-center gap-1.5 flex-wrap">
         <span id="badge-zoning" class="px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-300 border border-blue-500/40 font-semibold text-[11px] whitespace-nowrap">
-          제2종일반주거지역
+          용도지역 -
         </span>
         <span id="badge-jimok" class="px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 font-semibold text-[11px] whitespace-nowrap">
-          대지 (대)
+          지목 -
         </span>
         <span id="badge-area" class="px-2.5 py-0.5 rounded-full bg-slate-800 text-cyan-300 border border-slate-600 font-semibold text-[11px] whitespace-nowrap">
-          316 ㎡
+          면적 - ㎡
         </span>
       </div>
     </div>
@@ -97,11 +97,11 @@
     <div class="absolute top-3 left-3 z-10 space-y-1.5 pointer-events-none text-left">
       <div class="glass-panel p-2.5 rounded-xl border border-cyan-500/30 backdrop-blur-md shadow-xl w-32 md:w-40 pointer-events-auto text-left">
         <p class="text-[10px] text-slate-400 font-semibold">건폐율 (BCR)</p>
-        <p id="metric-bcr" class="text-base md:text-lg font-black text-cyan-300 font-tech">60%</p>
+        <p id="metric-bcr" class="text-base md:text-lg font-black text-cyan-300 font-tech">-</p>
       </div>
       <div class="glass-panel p-2.5 rounded-xl border border-cyan-500/30 backdrop-blur-md shadow-xl w-32 md:w-40 pointer-events-auto text-left">
         <p class="text-[10px] text-slate-400 font-semibold">용적률 (FAR)</p>
-        <p id="metric-far" class="text-base md:text-lg font-black text-blue-300 font-tech">200%</p>
+        <p id="metric-far" class="text-base md:text-lg font-black text-blue-300 font-tech">-</p>
       </div>
     </div>
 
@@ -214,8 +214,8 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/speech.js?v=20260909_13"></script>
-  <script src="js/map.js?v=20260909_13"></script>
-  <script src="js/app.js?v=20260909_13"></script>
+  <script src="js/speech.js?v=20260909_18"></script>
+  <script src="js/map.js?v=20260909_18"></script>
+  <script src="js/app.js?v=20260909_18"></script>
 </body>
 </html>
