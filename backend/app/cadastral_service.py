@@ -10,6 +10,88 @@ from typing import Dict, Any, List, Optional, Tuple, Union
 from shapely.geometry import Polygon, Point, shape
 from .config_loader import load_config
 
+def is_bare_dong(text: str) -> bool:
+    """
+    문자열이 '305동', '101동', '제101동', '101-1동', '101동 24층' 등 순수 동/호수 번호인지 판별
+    """
+    if not text:
+        return True
+    t = text.strip()
+    return bool(re.match(r'^(?:제\s*)?\d+(?:-\d+)?\s*동(?:\s*\d+층|\s*\d+호)?$', t))
+
+def clean_complex_title(raw_title: str, road_addr: str = "", parcel_addr: str = "", display_addr: str = "") -> str:
+    """
+    건물/단지명에서 '305동', '101동', '제101동', '101동 24층' 등 개별 동/층/호수 번호를 완벽히 제거.
+    만약 원본이 순수 동 번호(예: '305동')인 경우, 주소 괄호 안의 단지명(예: '한양수자인성남마크뷰')이나 지번 주소로 복원.
+    절대 단독 동 번호가 제목으로 노출되지 않도록 보장.
+    """
+    if not raw_title:
+        raw_title = ""
+
+    t = raw_title.strip()
+    # 1. 괄호 안의 동/호/층 정보 제거 (예: (101동), [102동], (제101동))
+    t = re.sub(r'[\(\[\{]\s*(?:제\s*)?\d+(?:-\d+)?\s*동?(?:\s*\d+층|\s*\d+호)?\s*[\)\]\}]', '', t)
+    
+    # 2. 끝부분에 붙은 동 정보 제거 (공백 유무 무관, 예: '그랑메종101동', '마크뷰 305동', '자이 제101동', '101동 24층')
+    t = re.sub(r'[\s_]*(?:제\s*)?\d+(?:-\d+)?[\s_]*동(?:\s*\d+층|\s*\d+호)?\s*$', '', t)
+    
+    # 3. 중간에 있는 동 정보 정리
+    t = re.sub(r'\s+(?:제\s*)?\d+(?:-\d+)?\s*동(?:\s*\d+층|\s*\d+호)?\b', '', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+
+    # 4. 만약 지워진 결과가 비어있거나 순수 동 번호(예: '305동')였다면 주소에서 아파트/단지명 추출 시도
+    if not t or is_bare_dong(t):
+        candidates = [display_addr, road_addr, parcel_addr]
+        for addr in candidates:
+            if not addr:
+                continue
+            m = re.search(r'\(([^)]+)\)', addr)
+            if m:
+                inside = m.group(1)
+                parts = [p.strip() for p in inside.split(',')]
+                for p in parts:
+                    cp = clean_complex_title(p)
+                    # 법정동 단순 지명이 아니고 순수 동 번호도 아닌 아파트명 발견 시 반환
+                    if cp and not is_bare_dong(cp) and not re.match(r'^[가-힣]+[동리]$', cp):
+                        return cp
+        
+        # 주소에서도 아파트명을 찾지 못했을 경우 깔끔한 지번/도로명 주소 반환 (동 번호는 절대 노출 금지)
+        fallback_addr = parcel_addr or road_addr or display_addr
+        if fallback_addr:
+            clean_fb = re.sub(r'\(.*?\)', '', fallback_addr).strip()
+            return clean_fb or fallback_addr
+        return ""
+
+    return t
+
+def clean_address_text(addr: str) -> str:
+    """
+    주소 문자열에서 괄호 안팎의 개별 동/층/호수 번호를 깔끔하게 정돈
+    예: '경기도 성남시 중원구 광명로 411 (한양수자인성남마크뷰 305동 24층)' -> '경기도 성남시 중원구 광명로 411 (한양수자인성남마크뷰)'
+    """
+    if not addr:
+        return ""
+
+    def clean_bracket(match):
+        content = match.group(1)
+        parts = [p.strip() for p in content.split(',')]
+        cleaned_parts = []
+        for p in parts:
+            cp = re.sub(r'[\s_]*(?:제\s*)?\d+(?:-\d+)?[\s_]*동(?:\s*\d+층|\s*\d+호)?', '', p)
+            cp = re.sub(r'\s*\d+층', '', cp)
+            cp = re.sub(r'\s*\d+호', '', cp)
+            cp = re.sub(r'\s+', ' ', cp).strip()
+            if cp:
+                cleaned_parts.append(cp)
+        if cleaned_parts:
+            return f"({', '.join(cleaned_parts)})"
+        return ""
+
+    res = re.sub(r'\(([^)]+)\)', clean_bracket, addr)
+    res = re.sub(r'\s+(?:제\s*)?\d+(?:-\d+)?\s*동(?:\s*\d+층|\s*\d+호)?\b', '', res)
+    res = re.sub(r'\s+', ' ', res).strip()
+    return res
+
 def search_address_location(query: str) -> Optional[Dict[str, Any]]:
     """
     V-World 공식 통합 검색(건물명/POI/주소) 및 정밀 지오코딩 API
@@ -39,118 +121,22 @@ def search_address_location(query: str) -> Optional[Dict[str, Any]]:
         "파크원": {"lat": 37.5255, "lng": 126.9272, "display_name": "서울특별시 영등포구 여의대로 108 (파크원 타워 69층)"},
         "IFC": {"lat": 37.5251, "lng": 126.9254, "display_name": "서울특별시 영등포구 국제금융로 10 (서울국제금융센터 55층)"},
         "타워팰리스": {"lat": 37.4883, "lng": 127.0537, "display_name": "서울특별시 강남구 언주로30길 56 (타워팰리스 66층)"},
-        "신세계쉐덴": {"lat": 37.44397, "lng": 127.14092, "display_name": "경기도 성남시 수정구 수정로 201 (성남 태평동 신세계쉐덴 101동)"},
-        "성남신세계쉐덴": {"lat": 37.44397, "lng": 127.14092, "display_name": "경기도 성남시 수정구 수정로 201 (성남 태평동 신세계쉐덴 101동)"},
-        # 한양수자인성남마크뷰 305동 및 수자인금광어린이집
-        "한양수자인성남마크뷰아파트 305동": {"lat": 37.4483689, "lng": 127.1728583, "display_name": "경기도 성남시 중원구 광명로 411 (한양수자인성남마크뷰 305동 24층)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "한양수자인성남마크뷰 305동"},
-        "한양수자인 305동": {"lat": 37.4483689, "lng": 127.1728583, "display_name": "경기도 성남시 중원구 광명로 411 (한양수자인성남마크뷰 305동 24층)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "한양수자인성남마크뷰 305동"},
-        "한양수자인305동": {"lat": 37.4483689, "lng": 127.1728583, "display_name": "경기도 성남시 중원구 광명로 411 (한양수자인성남마크뷰 305동 24층)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "한양수자인성남마크뷰 305동"},
+        "신세계쉐덴": {"lat": 37.44397, "lng": 127.14092, "display_name": "경기도 성남시 수정구 수정로 201 (성남 태평동 신세계쉐덴)", "road": "경기도 성남시 수정구 수정로 201", "parcel": "경기도 성남시 수정구 태평동 7336", "title": "성남 태평동 신세계쉐덴"},
+        "성남신세계쉐덴": {"lat": 37.44397, "lng": 127.14092, "display_name": "경기도 성남시 수정구 수정로 201 (성남 태평동 신세계쉐덴)", "road": "경기도 성남시 수정구 수정로 201", "parcel": "경기도 성남시 수정구 태평동 7336", "title": "성남 태평동 신세계쉐덴"},
+        # 한양수자인성남마크뷰 및 수자인금광어린이집
+        "한양수자인성남마크뷰아파트 305동": {"lat": 37.4483689, "lng": 127.1728583, "display_name": "경기도 성남시 중원구 광명로 411 (한양수자인성남마크뷰)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "한양수자인성남마크뷰"},
+        "한양수자인 305동": {"lat": 37.4483689, "lng": 127.1728583, "display_name": "경기도 성남시 중원구 광명로 411 (한양수자인성남마크뷰)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "한양수자인성남마크뷰"},
+        "한양수자인305동": {"lat": 37.4483689, "lng": 127.1728583, "display_name": "경기도 성남시 중원구 광명로 411 (한양수자인성남마크뷰)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "한양수자인성남마크뷰"},
         "수자인금광어린이집": {"lat": 37.4481097, "lng": 127.1726588, "display_name": "경기도 성남시 중원구 광명로 411 (수자인금광어린이집 2층)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "수자인금광어린이집"},
         "한양수자인어린이집": {"lat": 37.4481097, "lng": 127.1726588, "display_name": "경기도 성남시 중원구 광명로 411 (수자인금광어린이집 2층)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "수자인금광어린이집"},
         "한양수자인 어린이집": {"lat": 37.4481097, "lng": 127.1726588, "display_name": "경기도 성남시 중원구 광명로 411 (수자인금광어린이집 2층)", "road": "경기도 성남시 중원구 광명로 411", "parcel": "경기도 성남시 중원구 금광동 2600", "title": "수자인금광어린이집"},
-                                # 신구대학교 캠퍼스 전용 정밀 건물군 (본관, 도서관, 국제관, 산학협력관, 남관, 창업관, 부속유치원, 학생창업관, 동관, 복지관/미래창의관, 우촌학사/기숙사, 체육관, 실습관, 서관)
-        # 신구대학교 본관 및 우촌도서관 (통합 모델링)
-        "신구대": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대학교": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대학": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대본관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대학교본관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대학본관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대우촌관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대학교우촌관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "우촌관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대도서관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대학교도서관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대학도서관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "우촌도서관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대우촌도서관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-        "신구대학교우촌도서관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 본관 우촌관·도서관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 본관(우촌관·도서관)"},
-
-        # 신구대학교 국제관
-        "신구대국제관": {"lat": 37.449098, "lng": 127.169006, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 국제관 8층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 국제관"},
-        "신구대학교국제관": {"lat": 37.449098, "lng": 127.169006, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 국제관 8층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 국제관"},
-        "신구대학국제관": {"lat": 37.449098, "lng": 127.169006, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 국제관 8층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 국제관"},
-        
-        # 신구대학교 산학협력관
-        "신구대산학협력관": {"lat": 37.448505, "lng": 127.169354, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 산학협력관 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 산학협력관"},
-        "신구대학교산학협력관": {"lat": 37.448505, "lng": 127.169354, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 산학협력관 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 산학협력관"},
-        "신구대학산학협력관": {"lat": 37.448505, "lng": 127.169354, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 산학협력관 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 산학협력관"},
-        "신구대산학관": {"lat": 37.448505, "lng": 127.169354, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 산학협력관 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 산학협력관"},
-        "신구대학교산학관": {"lat": 37.448505, "lng": 127.169354, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 산학협력관 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 산학협력관"},
-        "신구대학산학관": {"lat": 37.448505, "lng": 127.169354, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 산학협력관 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 산학협력관"},
-        
-        # 4. 신구대학교 남관·창업관 일체형 복합 건물군 (지도 실측 1:1 완벽 일치 정밀 벡터)
-        "신구대남관": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "신구대학교남관": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "신구대학남관": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "남관": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "신구대창업관": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "신구대학교창업관": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "신구대학창업관": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "신구대창업보육센터": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "신구대학교창업보육센터": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "신구대학창업보육센터": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "창업관": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        "창업보육센터": {"lat": 37.448080, "lng": 127.169650, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 남관·창업관, 남관 5층 / 창업관 9층 일체형)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 남관·창업관 (5층/9층 일체형)"},
-        
-        # 5. 남관 남측 부속유치원 (지상 4층)
-        "신구대부속유치원": {"lat": 37.447746, "lng": 127.169334, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속유치원 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속유치원"},
-        "신구대학교부속유치원": {"lat": 37.447746, "lng": 127.169334, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속유치원 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속유치원"},
-        "신구대학부속유치원": {"lat": 37.447746, "lng": 127.169334, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속유치원 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속유치원"},
-        "신구대유치원": {"lat": 37.447746, "lng": 127.169334, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속유치원 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속유치원"},
-        "신구대학교유치원": {"lat": 37.447746, "lng": 127.169334, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속유치원 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속유치원"},
-        "신구대학유치원": {"lat": 37.447746, "lng": 127.169334, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속유치원 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속유치원"},
-        "부속유치원": {"lat": 37.447746, "lng": 127.169334, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속유치원 4층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속유치원"},
-
-        # 6. 부속유치원 동측 학생창업관 (지상 3층)
-        "신구대학생창업관": {"lat": 37.447837, "lng": 127.169761, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생창업관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생창업관"},
-        "신구대학교학생창업관": {"lat": 37.447837, "lng": 127.169761, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생창업관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생창업관"},
-        "신구대학학생창업관": {"lat": 37.447837, "lng": 127.169761, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생창업관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생창업관"},
-        "학생창업관": {"lat": 37.447837, "lng": 127.169761, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생창업관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생창업관"},
-        
-        # 신구대학교 실습관 & 서관
-        "신구대실습관": {"lat": 37.449406, "lng": 127.166777, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 실습관 5층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 실습관"},
-        "신구대학교실습관": {"lat": 37.449406, "lng": 127.166777, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 실습관 5층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 실습관"},
-        "신구대학실습관": {"lat": 37.449406, "lng": 127.166777, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 실습관 5층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 실습관"},
-        "실습관": {"lat": 37.449406, "lng": 127.166777, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 실습관 5층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 실습관"},
-        "신구대서관": {"lat": 37.449835, "lng": 127.166699, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 서관 5층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 서관"},
-        "신구대학교서관": {"lat": 37.449835, "lng": 127.166699, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 서관 5층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 서관"},
-        "신구대학서관": {"lat": 37.449835, "lng": 127.166699, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 서관 5층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 서관"},
-        "서관": {"lat": 37.449835, "lng": 127.166699, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 서관 5층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 서관"},
-        "신구대치과의원": {"lat": 37.448749, "lng": 127.168058, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속치과의원)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속치과의원"},
-        "신구대학교치과의원": {"lat": 37.448749, "lng": 127.168058, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 부속치과의원)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 부속치과의원"},
-        "신구대박물관": {"lat": 37.448838, "lng": 127.167686, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌박물관)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 우촌박물관(본관)"},
-        "신구대학교박물관": {"lat": 37.448838, "lng": 127.167686, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌박물관)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 우촌박물관(본관)"},
-        
-        # 신구대학교 동관
-        "신구대동관": {"lat": 37.449940, "lng": 127.168085, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 동관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 동관"},
-        "신구대학교동관": {"lat": 37.449940, "lng": 127.168085, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 동관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 동관"},
-        "신구대학동관": {"lat": 37.449940, "lng": 127.168085, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 동관 6층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 동관"},
-        
-        # 신구대학교 학생복지관/미래창의관
-        "신구대복지관": {"lat": 37.447395, "lng": 127.168393, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생복지관·미래창의관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생복지관(미래창의관)"},
-        "신구대학교복지관": {"lat": 37.447395, "lng": 127.168393, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생복지관·미래창의관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생복지관(미래창의관)"},
-        "신구대학복지관": {"lat": 37.447395, "lng": 127.168393, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생복지관·미래창의관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생복지관(미래창의관)"},
-        "미래창의관": {"lat": 37.447395, "lng": 127.168393, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생복지관·미래창의관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생복지관(미래창의관)"},
-        "신구대미래창의관": {"lat": 37.447395, "lng": 127.168393, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 학생복지관·미래창의관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 학생복지관(미래창의관)"},
-        
-        # 신구대학교 체육관 (지상 3층 경기장, 국토부 전자지도 17개 정점 실측 형상)
-        "신구대체육관": {"lat": 37.447325, "lng": 127.167842, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 체육관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 체육관"},
-        "신구대학교체육관": {"lat": 37.447325, "lng": 127.167842, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 체육관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 체육관"},
-        "신구대학체육관": {"lat": 37.447325, "lng": 127.167842, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 체육관 3층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 체육관"},
-        
-        # 신구대학교 기숙사 (우촌학사 9층)
-        "신구대우촌학사": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-        "신구대학교우촌학사": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-        "우촌학사": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-        "신구대기숙사": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-        "신구대학교기숙사": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-        "신구대학기숙사": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-        "신구대생활관": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-        "신구대학교생활관": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-        "신구대학생활관": {"lat": 37.447201, "lng": 127.168485, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교 우촌학사·생활관 9층)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교 기숙사(우촌학사)"},
-
-                "킨텍스제1전시장": {"lat": 37.669119, "lng": 126.746090, "display_name": "경기도 고양시 일산서구 킨텍스로 217-60 (킨텍스 제1전시장)"},
+                                # 신구대학교 캠퍼스 전용
+        "신구대": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교"},
+        "신구대학교": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교"},
+        "신구대학": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교"},
+        "신구대본관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교"},
+        "신구대학교본관": {"lat": 37.448919, "lng": 127.167702, "display_name": "경기도 성남시 중원구 광명로 377 (신구대학교)", "road": "경기도 성남시 중원구 광명로 377", "parcel": "경기도 성남시 중원구 금광동 2685", "title": "신구대학교"},
+        "킨텍스제1전시장": {"lat": 37.669119, "lng": 126.746090, "display_name": "경기도 고양시 일산서구 킨텍스로 217-60 (킨텍스 제1전시장)"},
         "킨텍스 제1전시장": {"lat": 37.669119, "lng": 126.746090, "display_name": "경기도 고양시 일산서구 킨텍스로 217-60 (킨텍스 제1전시장)"},
         "킨텍스1전시장": {"lat": 37.669119, "lng": 126.746090, "display_name": "경기도 고양시 일산서구 킨텍스로 217-60 (킨텍스 제1전시장)"},
         "킨텍스 1전시장": {"lat": 37.669119, "lng": 126.746090, "display_name": "경기도 고양시 일산서구 킨텍스로 217-60 (킨텍스 제1전시장)"},
@@ -1085,10 +1071,7 @@ def fetch_building_register_data(sigunguCd: str, bjdongCd: str, bun: str, ji: st
     dongNm = str(best_item.get("dongNm", "")).strip()
     if not bldNm and target_bld:
         bldNm = target_bld
-    if dongNm and dongNm not in bldNm:
-        bldNm = f"{bldNm} {dongNm}".strip()
-    elif target_dong and target_dong not in bldNm:
-        bldNm = f"{bldNm} {target_dong}".strip()
+    bldNm = clean_complex_title(bldNm)
 
     main_purps_str = str(best_item.get("mainPurpsCdNm", "일반건축물")).strip()
     is_apt_reg = bool(
@@ -1227,7 +1210,6 @@ def fetch_vworld_gis_building(lat: float, lng: float) -> Optional[Dict[str, Any]
                         raw_dc = (props.get("buld_nm_dc") or "").strip()
 
                         # 성남 태평동 신세계쉐덴 (4개 동 주상복합 단지) 개별 동 정밀 분리
-                        # 클릭 시 기단부 전체(10,033㎡)를 한꺼번에 잡지 않고 사용자가 클릭한 동(101동, 102동, 103동, 104동)만 정확히 단독 선별
                         is_shinsegae_chaden = bool(
                             "신세계쉐덴" in raw_bld or "신세계 쉐덴" in raw_bld or
                             props.get("bd_mgt_sn") == "4113110200173360000000001"
@@ -1297,8 +1279,8 @@ def fetch_vworld_gis_building(lat: float, lng: float) -> Optional[Dict[str, Any]
                             return {
                                 "polygon": chosen["polygon"],
                                 "coordinates": chosen["polygon"],
-                                "bld_nm": f"성남 태평동 신세계쉐덴 {chosen['dong_nm']}",
-                                "bld_name": f"성남 태평동 신세계쉐덴 {chosen['dong_nm']}",
+                                "bld_nm": "성남 태평동 신세계쉐덴",
+                                "bld_name": "성남 태평동 신세계쉐덴",
                                 "base_bld_nm": "성남 태평동 신세계쉐덴",
                                 "dong_nm": chosen["dong_nm"],
                                 "dong_name": chosen["dong_nm"],
@@ -1310,7 +1292,6 @@ def fetch_vworld_gis_building(lat: float, lng: float) -> Optional[Dict[str, Any]
                             }
 
                         # 한양수자인 성남마크뷰 305동 및 수자인금광어린이집 정밀 분리
-                        # 국토교통부 전자지도(LT_C_SPBD)에서 305동(24층)과 부속 어린이집(2층)이 하나의 복합 다각형으로 붙어 있는 것을 클릭 위치에 따라 정밀 분리
                         is_sujain_305_or_care = bool(
                             props.get("bd_mgt_sn") == "4113310300126220000042718" or
                             ("한양수자인" in raw_bld and ("305" in raw_dc or "305" in raw_bld or "어린이집" in raw_bld)) or
@@ -1342,8 +1323,8 @@ def fetch_vworld_gis_building(lat: float, lng: float) -> Optional[Dict[str, Any]
                                 return {
                                     "polygon": poly_305,
                                     "coordinates": poly_305,
-                                    "bld_nm": "한양수자인성남마크뷰 305동",
-                                    "bld_name": "한양수자인성남마크뷰 305동",
+                                    "bld_nm": "한양수자인성남마크뷰",
+                                    "bld_name": "한양수자인성남마크뷰",
                                     "base_bld_nm": "한양수자인성남마크뷰",
                                     "dong_nm": "305동",
                                     "dong_name": "305동",
@@ -1392,13 +1373,11 @@ def fetch_vworld_gis_building(lat: float, lng: float) -> Optional[Dict[str, Any]
                             if m_bld:
                                 dong_nm = f"{m_bld.group(1)}동"
 
-                        base_bld_nm = re.sub(r'\(?\d+\s*동\)?', '', raw_bld).strip()
+                        base_bld_nm = clean_complex_title(raw_bld)
                         if not base_bld_nm:
                             base_bld_nm = raw_bld
 
                         full_bld_nm = base_bld_nm
-                        if dong_nm and dong_nm not in full_bld_nm:
-                            full_bld_nm = f"{full_bld_nm} {dong_nm}".strip()
                         floors = 0
                         try:
                             floors = int(props.get("gro_flo_co") or 0)
@@ -1610,188 +1589,348 @@ def fetch_vworld_gis_building(lat: float, lng: float) -> Optional[Dict[str, Any]
                     continue
     return None
 
+KOREAN_JIMOK_DATABASE = {
+    "전": ("전", "전 (전)"),
+    "답": ("답", "답 (답)"),
+    "과": ("과", "과수원 (과)"),
+    "목": ("목", "목장용지 (목)"),
+    "임": ("임", "임야 (임)"),
+    "광": ("광", "광천지 (광)"),
+    "염": ("염", "염전 (염)"),
+    "대": ("대", "대지 (대)"),
+    "장": ("장", "공장용지 (장)"),
+    "학": ("학", "학교용지 (학)"),
+    "차": ("차", "주차장 (차)"),
+    "주": ("주", "주유소용지 (주)"),
+    "창": ("창", "창고용지 (창)"),
+    "도": ("도", "도로 (도)"),
+    "철": ("철", "철도용지 (철)"),
+    "제": ("제", "제방 (제)"),
+    "천": ("천", "하천 (천)"),
+    "구": ("구", "구거 (구)"),
+    "유": ("유", "유지 (유)"),
+    "양": ("양", "양어장 (양)"),
+    "수": ("수", "수도용지 (수)"),
+    "공": ("공", "공원 (공)"),
+    "체": ("체", "체육용지 (체)"),
+    "원": ("원", "유원지 (원)"),
+    "종": ("종", "종교용지 (종)"),
+    "사": ("사", "사적지 (사)"),
+    "묘": ("묘", "묘지 (묘)"),
+    "잡": ("잡", "잡종지 (잡)")
+}
+
+def parse_jibun_and_jimok(jibun_raw: str, full_addr: str = "", title: str = "") -> Tuple[str, str, str]:
+    """
+    지적 속성 문자열(예: '2600 대', '736-1 대', '2685학', '1289대')에서
+    1) 순수 지번 번호(예: '2600', '736-1', '2685')
+    2) 단축 지목(예: '대', '학', '도')
+    3) 정식 지목 명칭(예: '대지 (대)', '학교용지 (학)', '도로 (도)')
+    을 100% 정밀 분리 추출 (공백 및 하이픈 처리)
+    """
+    raw = (jibun_raw or "").strip()
+    jm_char = ""
+    m = re.search(r'([가-힣])\s*$', raw)
+    if m:
+        candidate = m.group(1)
+        if candidate in KOREAN_JIMOK_DATABASE:
+            jm_char = candidate
+
+    clean_num = re.sub(r'[^\d\-]', '', raw).strip('-')
+
+    if not jm_char:
+        for k in ["학교", "대학"]:
+            if k in title or k in full_addr:
+                jm_char = "학"
+                break
+        if not jm_char and ("도로" in title or "도로" in full_addr):
+            jm_char = "도"
+        elif not jm_char and "주차장" in title:
+            jm_char = "차"
+        elif not jm_char and "공장" in title:
+            jm_char = "장"
+        elif not jm_char and "공원" in title:
+            jm_char = "공"
+        elif not jm_char and "하천" in title:
+            jm_char = "천"
+        elif not jm_char:
+            jm_char = "대"
+
+    short_jm, full_jm = KOREAN_JIMOK_DATABASE.get(jm_char, (jm_char or "대", f"{jm_char} ({jm_char})" if jm_char else "대지 (대)"))
+    return clean_num, short_jm, full_jm
+
+def fetch_cadastral_parcel_boundary(lat: float, lng: float, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    국토교통부 V-World 연속지적도(LP_PA_CBND_BUBUN) API 연동
+    클릭한 건물이 포함된 '전체 대지 필지(Cadastral Parcel) 경계선'을 정밀 추출
+    """
+    cfg = load_config()
+    key = api_key or cfg.get("VWORLD_API_KEY") or "DEB860E4-52DC-35F3-9E68-664B22DF3592"
+    url = "https://api.vworld.kr/req/data"
+
+    for domain in ["192.168.219.106", "localhost", "127.0.0.1", ""]:
+        for geom_str in [f"POINT({lng} {lat})", f"BOX({lng-0.0003},{lat-0.0003},{lng+0.0003},{lat+0.0003})"]:
+            try:
+                params = {
+                    "service": "data",
+                    "request": "GetFeature",
+                    "data": "LP_PA_CBND_BUBUN",
+                    "key": key,
+                    "domain": domain,
+                    "geomFilter": geom_str,
+                    "crs": "EPSG:4326",
+                    "format": "json",
+                    "size": "10"
+                }
+                res = requests.get(url, params=params, timeout=3.5).json()
+                feats = res.get("response", {}).get("result", {}).get("featureCollection", {}).get("features", [])
+                if feats:
+                    pt = Point(lng, lat)
+                    best_feat = None
+                    best_poly = None
+
+                    for f in feats:
+                        g = f.get("geometry", {})
+                        s = shape(g)
+                        if s.geom_type == "MultiPolygon":
+                            for sub_p in s.geoms:
+                                if sub_p.contains(pt) or sub_p.distance(pt) < 0.00005:
+                                    best_feat = f
+                                    best_poly = sub_p
+                                    break
+                        elif s.geom_type == "Polygon":
+                            if s.contains(pt) or s.distance(pt) < 0.00005:
+                                best_feat = f
+                                best_poly = s
+                                break
+                        if best_poly:
+                            break
+
+                    if not best_poly:
+                        f = feats[0]
+                        best_feat = f
+                        s = shape(f.get("geometry", {}))
+                        if s.geom_type == "MultiPolygon":
+                            best_poly = max(s.geoms, key=lambda p: p.area)
+                        else:
+                            best_poly = s
+
+                    if best_poly:
+                        coords = list(best_poly.exterior.coords)
+                        poly_pts = [[round(p[0], 7), round(p[1], 7)] for p in coords]
+                        props = best_feat.get("properties", {})
+
+                        centroid = best_poly.centroid
+                        lat_rad = math.radians(centroid.y)
+                        m_per_deg_lat = 111132.954
+                        m_per_deg_lng = 111132.954 * math.cos(lat_rad)
+                        area_sqm = best_poly.area * m_per_deg_lat * m_per_deg_lng
+
+                        jibun_raw = props.get("jibun", "") or ""
+                        clean_jibun, short_jm, full_jm = parse_jibun_and_jimok(jibun_raw, full_addr=props.get("addr", ""))
+
+                        return {
+                            "polygon_coords": poly_pts,
+                            "site_area_sqm": round(area_sqm, 1),
+                            "pnu": props.get("pnu", ""),
+                            "jibun": clean_jibun or jibun_raw,
+                            "jimok": full_jm,
+                            "jimok_short": short_jm,
+                            "addr": props.get("addr", ""),
+                            "jiga": props.get("jiga", "")
+                        }
+            except Exception:
+                continue
+    return None
+
 def fetch_vworld_parcel(lat: float, lng: float, api_key: Optional[str] = None, scan_index: int = 0) -> Dict[str, Any]:
     """
     V-World 토지(지적) 및 국토부 실측 건물 API 연계 파셀 분석기
-    신구대학교 캠퍼스 내 개별 건물(본관, 도서관, 국제관, 산학협력관, 남관, 창업관, 부속유치원, 학생창업관, 복지관, 체육관, 기숙사 등) 정밀 라우팅
+    ★ 건물을 클릭하더라도 건물 개별 윤곽선이 아닌, 그 건물이 포함된 '전체 대지 필지(Cadastral Parcel)'를 정밀 표출
     """
     cfg = load_config()
     vworld_key = api_key or cfg.get("VWORLD_API_KEY") or "DEB860E4-52DC-35F3-9E68-664B22DF3592"
 
-    # 1. 주소 및 지적 정보 역지오코딩
+    # 1. 국토교통부 연속지적도(LP_PA_CBND_BUBUN) API로 실제 대지 필지 전체 폴리곤 우선 획득
+    cadastral_parcel = fetch_cadastral_parcel_boundary(lat, lng, vworld_key)
+
+    # 2. 주소 및 지적 정보 역지오코딩
     raw_addr_info = get_korean_address_and_pnu(lat, lng)
     road_addr = raw_addr_info.get("road_address") or ""
-    parcel_addr = raw_addr_info.get("parcel_address") or ""
+    parcel_addr = (cadastral_parcel.get("addr") if cadastral_parcel else "") or raw_addr_info.get("parcel_address") or ""
     display_addr = road_addr or parcel_addr or f"위도 {lat:.6f}, 경도 {lng:.6f}"
-    pnu = raw_addr_info.get("pnu") or ""
-    sigunguCd = raw_addr_info.get("sigunguCd") or (pnu[:5] if len(pnu) >= 5 else "11680")
-    bjdongCd = raw_addr_info.get("bjdongCd") or (pnu[5:10] if len(pnu) >= 10 else "10300")
+    pnu = (cadastral_parcel.get("pnu") if cadastral_parcel else "") or raw_addr_info.get("pnu") or ""
+    sigunguCd = raw_addr_info.get("sigunguCd") or (pnu[:5] if len(pnu) >= 5 else "41133")
+    bjdongCd = raw_addr_info.get("bjdongCd") or (pnu[5:10] if len(pnu) >= 10 else "10400")
     bun = raw_addr_info.get("bun") or (pnu[11:15] if len(pnu) >= 15 else "0000")
     ji = raw_addr_info.get("ji") or (pnu[15:19] if len(pnu) >= 19 else "0000")
 
-    # 2. 랜드마크/건물 실측 GIS 다각형 우선 조회
+    # 3. 랜드마크/건물 실측 정보 조회 (건물명 및 층수 분석용)
     gis_building = fetch_vworld_gis_building(lat, lng)
     target_bld_nm = (gis_building.get("bld_nm") or gis_building.get("bld_name") or "") if gis_building else ""
     target_dong_from_gis = (gis_building.get("dong_nm") or gis_building.get("dong_name") or "") if gis_building else ""
 
-    # 3. 실제 신구대학교 대지(금광동 2685 / 광명로 377)이거나 신구대 건물인 경우에만 특화 처리
+    # 4. 신구대학교 캠퍼스 판별
     is_shingu_campus = (
         (sigunguCd == "41133" and bun in ["2685", "2655"]) or
         ("광명로 377" in road_addr) or
         ("금광동 2685" in parcel_addr) or
         ("신구" in target_bld_nm or "우촌" in target_bld_nm or "학생창업관" in target_bld_nm) or
-        (37.44765 <= lat <= 37.44800 and 127.16955 <= lng <= 127.16995)
+        (37.44700 <= lat <= 37.45040 and 127.16620 <= lng <= 127.17020)
     )
 
     if is_shingu_campus:
-        check_lat = lat
-        check_lng = lng
+        bld_name = "신구대학교"
+        floors = gis_building.get("floors", 5) if gis_building else 5
 
-        if (37.44765 <= check_lat <= 37.44800 and 127.16955 <= check_lng <= 127.16995) or ("학생창업관" in target_bld_nm):
-            bld_name = "신구대학교 학생창업관"
-            floors = 3
-        elif (37.44825 <= check_lat <= 37.44900 and 127.16885 <= check_lng <= 127.16965) or ("산학협력관" in target_bld_nm or "산학관" in target_bld_nm):
-            bld_name = "신구대학교 산학협력관"
-            floors = 4
-        elif ((37.44795 <= check_lat <= 37.44855 and 127.16880 <= check_lng <= 127.17020) or ("남관" in target_bld_nm or ("창업관" in target_bld_nm and "학생" not in target_bld_nm) or "창업보육" in target_bld_nm)) and "학생" not in target_bld_nm:
-            bld_name = "신구대학교 남관·창업관"
-            floors = 9
-        elif (37.44700 <= check_lat <= 37.44765 and 127.16745 <= check_lng <= 127.16820) or ("체육관" in target_bld_nm):
-            bld_name = "신구대학교 체육관"
-            floors = 3
-        elif (37.44732 <= check_lat <= 37.44765 and 127.16805 <= check_lng <= 127.16875) or ("복지관" in target_bld_nm or "미래창의관" in target_bld_nm):
-            bld_name = "신구대학교 학생복지관(미래창의관)"
-            floors = 3
-        elif (37.44695 <= check_lat < 37.44732 and 127.16820 <= check_lng <= 127.16880) or ("기숙사" in target_bld_nm or "우촌학사" in target_bld_nm or "생활관" in target_bld_nm):
-            bld_name = "신구대학교 기숙사(우촌학사)"
-            floors = 9
-        elif (37.44880 <= check_lat <= 37.44955 and 127.16850 <= check_lng <= 127.16945) or ("국제관" in target_bld_nm):
-            bld_name = "신구대학교 국제관"
-            floors = 8
-        elif (37.44855 <= check_lat <= 37.44935 and 127.16715 <= check_lng <= 127.16815) or ("본관" in target_bld_nm or "도서관" in target_bld_nm or "우촌관" in target_bld_nm or "박물관" in target_bld_nm or "우촌도서관" in target_bld_nm):
-            bld_name = "신구대학교 본관(우촌관·도서관)"
-            floors = 6
-        elif (37.44755 <= check_lat <= 37.44795 and 127.16900 <= check_lng <= 127.16955) or ("부속유치원" in target_bld_nm or "유치원" in target_bld_nm):
-            bld_name = "신구대학교 부속유치원"
-            floors = 4
-        elif (37.44975 <= check_lat <= 37.45035 and 127.16765 <= check_lng <= 127.16855) or ("동관" in target_bld_nm):
-            bld_name = "신구대학교 동관"
-            floors = 6
-        elif (37.44965 < check_lat <= 37.45040 and 127.16620 <= check_lng <= 127.16745) or ("서관" in target_bld_nm):
-            bld_name = "신구대학교 서관"
-            floors = 5
-        elif (37.44920 <= check_lat <= 37.44965 and 127.16630 <= check_lng <= 127.16705) or ("실습관" in target_bld_nm):
-            bld_name = "신구대학교 실습관"
-            floors = 5
+        # ★ 개별 건물이 아닌 신구대학교 전체 대지 필지(금광동 2685) 폴리곤 적용
+        if cadastral_parcel and cadastral_parcel.get("polygon_coords"):
+            final_poly = cadastral_parcel["polygon_coords"]
+            site_area = cadastral_parcel.get("site_area_sqm") or 83800.0
+            jimok = cadastral_parcel.get("jimok") or "학교용지 (학)"
         else:
-            bld_name = target_bld_nm or "신구대학교"
-            floors = gis_building.get("floors", 5) if gis_building else 5
-
-        bld_poly = generate_site_polygon_by_type(lat, lng, bld_name=bld_name, sigunguCd="41133", bun="2685")
-        if not bld_poly and gis_building and (gis_building.get("polygon") or gis_building.get("coordinates")):
-            bld_poly = gis_building.get("polygon") or gis_building.get("coordinates")
-        if not bld_poly:
-            angle_deg = get_road_grid_angle(lat, lng, bld_name)
-            bld_poly = generate_oriented_parcel_polygon(lat, lng, angle_deg)
+            final_poly = generate_site_polygon_by_type(lat, lng, bld_name="신구대학교", sigunguCd="41133", bun="2685")
+            site_area = 83800.0
+            jimok = "학교용지 (학)"
 
         return {
-            "pnu": "4113310200126850000",
+            "pnu": pnu or "4113310300126850000",
+            "jibun": "2685",
             "address": "경기도 성남시 중원구 광명로 377",
             "road_address": "경기도 성남시 중원구 광명로 377",
             "parcel_address": "경기도 성남시 중원구 금광동 2685",
-            "title": f"📍 {bld_name} (경기도 성남시 중원구 광명로 377, 실측 {floors}층)",
-            "bld_name": bld_name,
+            "title": "신구대학교",
+            "bld_name": "신구대학교",
             "dong_name": "",
+            "jimok": jimok or "학교용지 (학)",
+            "jimok_short": "학",
             "land_use": "학교용지",
             "zoning": "제2종일반주거지역",
-            "site_area_sqm": 650.0,
+            "site_area_sqm": site_area,
             "bcr": 60.0,
             "far": 200.0,
             "existing_floors": floors,
             "floor_height_m": 3.2,
-            "polygon_coords": bld_poly,
+            "polygon_coords": final_poly,
             "is_gis_polygon": True,
             "gis_feature": gis_building
         }
 
-    # 3. 일반 필지 조회 로직
-    raw_addr_info = get_korean_address_and_pnu(lat, lng)
-    road_addr = raw_addr_info.get("road_address") or ""
-    parcel_addr = raw_addr_info.get("parcel_address") or ""
-    display_addr = road_addr or parcel_addr or f"위도 {lat:.6f}, 경도 {lng:.6f}"
-    pnu = raw_addr_info.get("pnu") or ""
-
-    sigunguCd = raw_addr_info.get("sigunguCd") or (pnu[:5] if len(pnu) >= 5 else "11680")
-    bjdongCd = raw_addr_info.get("bjdongCd") or (pnu[5:10] if len(pnu) >= 10 else "10300")
-    bun = raw_addr_info.get("bun") or (pnu[11:15] if len(pnu) >= 15 else "0000")
-    ji = raw_addr_info.get("ji") or (pnu[15:19] if len(pnu) >= 19 else "0000")
-
-    target_bld_from_gis = (gis_building.get("bld_nm") or gis_building.get("bld_name") or "") if gis_building else ""
-    target_dong_from_gis = (gis_building.get("dong_nm") or gis_building.get("dong_name") or "") if gis_building else ""
-
+    # 5. 일반 필지 조회 로직 (전체 대지 필지 폴리곤 적용)
     bld_reg = fetch_building_register_data(
         sigunguCd, bjdongCd, bun, ji,
         target_dong=target_dong_from_gis,
-        target_bld=target_bld_from_gis
+        target_bld=target_bld_nm
     )
 
+    clean_road = clean_address_text(road_addr)
+    clean_parcel = clean_address_text(parcel_addr)
+    clean_display = clean_address_text(display_addr)
+
+    raw_candidates = []
     if bld_reg:
-        bld_title = bld_reg.get("bldNm") or target_bld_from_gis
-        dong_title = bld_reg.get("dongNm") or target_dong_from_gis
-        full_title = f"{bld_title} {dong_title}".strip() if dong_title and dong_title not in bld_title else bld_title
+        if bld_reg.get("bldNm"):
+            raw_candidates.append(bld_reg.get("bldNm"))
+    if gis_building:
+        if gis_building.get("base_bld_nm"):
+            raw_candidates.append(gis_building.get("base_bld_nm"))
+        if gis_building.get("bld_nm"):
+            raw_candidates.append(gis_building.get("bld_nm"))
+        if gis_building.get("bld_name"):
+            raw_candidates.append(gis_building.get("bld_name"))
+    if target_bld_nm:
+        raw_candidates.append(target_bld_nm)
+
+    full_title = ""
+    for cand in raw_candidates:
+        if not cand or cand in ["일반건축물", "건축물"]:
+            continue
+        ct = clean_complex_title(cand, road_addr=clean_road, parcel_addr=clean_parcel, display_addr=clean_display)
+        if ct and not is_bare_dong(ct) and ct not in ["일반건축물", "건축물"]:
+            full_title = ct
+            break
+
+    if not full_title:
+        # 주소 문자열에서 아파트명 추출 시도
+        full_title = clean_complex_title("", road_addr=clean_road, parcel_addr=clean_parcel, display_addr=clean_display)
+
+    if not full_title or is_bare_dong(full_title) or full_title in ["일반필지", "일반건축물", "건축물"]:
+        # 동 번호 대신 깔끔한 지번/도로명 주소 사용
+        clean_fb = re.sub(r'\(.*?\)', '', clean_parcel or clean_road or clean_display).strip()
+        full_title = clean_fb or clean_parcel or clean_road or "선택된 지적 필지"
+
+    if bld_reg:
         floors = bld_reg.get("grndFlrCnt") or (gis_building.get("floors") if gis_building else None) or 4
-        site_area = float(bld_reg.get("platArea") or 0.0) or 450.0
+        site_area = float(bld_reg.get("platArea") or 0.0) or (cadastral_parcel.get("site_area_sqm") if cadastral_parcel else 450.0)
         bcr = float(bld_reg.get("bcRat") or 0.0) or 60.0
         far = float(bld_reg.get("vlRat") or 0.0) or 200.0
         main_purps = bld_reg.get("mainPurps") or "일반건축물"
     elif gis_building:
-        full_title = gis_building.get("bld_nm") or gis_building.get("bld_name") or "일반건축물"
         floors = gis_building.get("floors") or 4
-        site_area = 450.0
+        site_area = (cadastral_parcel.get("site_area_sqm") if cadastral_parcel else 450.0)
         bcr = 60.0
         far = 200.0
         main_purps = "건축물"
     else:
-        full_title = "일반필지"
         floors = 4
-        site_area = 450.0
+        site_area = (cadastral_parcel.get("site_area_sqm") if cadastral_parcel else 450.0)
         bcr = 60.0
         far = 200.0
         main_purps = "대지"
 
-    landmark_poly = generate_site_polygon_by_type(lat, lng, bld_name=full_title, road_addr=road_addr, sigunguCd=sigunguCd, bun=bun)
-    if landmark_poly:
-        bld_poly = landmark_poly
+    # ★ 필지 전체 폴리곤 우선 할당
+    if cadastral_parcel and cadastral_parcel.get("polygon_coords"):
+        bld_poly = cadastral_parcel["polygon_coords"]
         is_gis = True
-    elif gis_building and (gis_building.get("polygon") or gis_building.get("coordinates")):
-        bld_poly = gis_building.get("polygon") or gis_building.get("coordinates")
-        is_gis = True
+        site_area = cadastral_parcel.get("site_area_sqm") or site_area
+        jimok = cadastral_parcel.get("jimok") or "대지 (대)"
     else:
-        search_context = f"{full_title} {road_addr}"
-        angle_deg = get_road_grid_angle(lat, lng, search_context)
-        bld_poly = generate_oriented_parcel_polygon(lat, lng, angle_deg)
-        is_gis = False
+        landmark_poly = generate_site_polygon_by_type(lat, lng, bld_name=full_title, road_addr=clean_road, sigunguCd=sigunguCd, bun=bun)
+        if landmark_poly:
+            bld_poly = landmark_poly
+            is_gis = True
+        elif gis_building and (gis_building.get("polygon") or gis_building.get("coordinates")):
+            bld_poly = gis_building.get("polygon") or gis_building.get("coordinates")
+            is_gis = True
+        else:
+            search_context = f"{full_title} {clean_road}"
+            angle_deg = get_road_grid_angle(lat, lng, search_context)
+            bld_poly = generate_oriented_parcel_polygon(lat, lng, angle_deg)
+            is_gis = False
 
-    if is_shingu_campus or "학교" in full_title or "대학교" in full_title:
-        jimok = "학교용지 (학)"
-    elif "도로" in full_title:
-        jimok = "도로 (도)"
-    elif "주차장" in full_title:
-        jimok = "주차장 (차)"
-    elif "공장" in full_title:
-        jimok = "공장용지 (장)"
-    else:
-        jimok = "대지 (대)"
+        if "학교" in full_title or "대학교" in full_title:
+            jimok = "학교용지 (학)"
+        elif "도로" in full_title:
+            jimok = "도로 (도)"
+        elif "주차장" in full_title:
+            jimok = "주차장 (차)"
+        elif "공장" in full_title:
+            jimok = "공장용지 (장)"
+        else:
+            jimok = "대지 (대)"
+
+    clean_jibun = (cadastral_parcel.get("jibun") if cadastral_parcel else "") or ""
+    clean_jimok = (cadastral_parcel.get("jimok") if cadastral_parcel else "") or jimok
+    clean_jimok_short = (cadastral_parcel.get("jimok_short") if cadastral_parcel else "") or ""
+
+    if not clean_jimok_short:
+        clean_num_parsed, clean_jimok_short, clean_jimok = parse_jibun_and_jimok(clean_jibun, full_addr=clean_parcel or clean_road, title=full_title)
+        if not clean_jibun:
+            clean_jibun = clean_num_parsed
+
+    final_display_addr = clean_road or clean_parcel or clean_display or f"위도 {lat:.6f}, 경도 {lng:.6f}"
 
     return {
         "pnu": pnu,
-        "address": display_addr,
-        "road_address": road_addr,
-        "parcel_address": parcel_addr,
-        "title": f"📍 {full_title} ({display_addr})" if full_title != "일반필지" else display_addr,
+        "jibun": clean_jibun,
+        "address": final_display_addr,
+        "road_address": clean_road,
+        "parcel_address": clean_parcel,
+        "title": full_title,
         "bld_name": full_title,
         "dong_name": target_dong_from_gis,
-        "jimok": jimok,
+        "jimok": clean_jimok,
+        "jimok_short": clean_jimok_short,
         "land_use": main_purps,
         "zoning": "제2종일반주거지역",
         "site_area_sqm": site_area,
@@ -1803,3 +1942,4 @@ def fetch_vworld_parcel(lat: float, lng: float, api_key: Optional[str] = None, s
         "is_gis_polygon": is_gis,
         "gis_feature": gis_building
     }
+

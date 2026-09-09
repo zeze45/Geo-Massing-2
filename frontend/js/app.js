@@ -1,20 +1,21 @@
 /**
- * app.js - 메인 애플리케이션 상태 제어, 실존 3층 건물 연동 & OpenStreetMap 타일 지도
+ * app.js - 메인 애플리케이션 상태 제어 (2D 지도 중심 & 이동 없는 원클릭 토지/법규 분석)
  */
 
 class App {
   constructor() {
-    this.viewer = null;
     this.speech = window.aiSpeechAgent;
     this.currentData = null;
-    this.activeTab = '3d_view'; // '3d_view' | 'report'
-    this.defaultMetrics = null;
-    this.sliderTimer = null;
-    this.scanCount = 0;
+    this.originalData = null;
+    this.activeTab = 'map_view'; // 'map_view' | 'report'
     this.lastLat = 37.448919;
     this.lastLng = 127.167702;
     this.map = null;
-    this.manualRotationEnabled = false;
+    this.layerMenuClosedAt = 0;
+  }
+
+  isLayerMenuClosing() {
+    return (Date.now() - this.layerMenuClosedAt) < 400;
   }
 
   async init() {
@@ -31,9 +32,8 @@ class App {
       console.warn("Config load error:", e);
     }
 
-    // 1. 3D 뷰어 초기화
-    this.viewer = new CadastralARViewer('three-canvas');
-    this.viewer.init();
+    // 1. 2D 지적 및 공간정보 지도 초기화 (클릭으로 토지 선택)
+    this.initCadastralMap();
 
     // 2. TTS 상태 콜백 바인딩
     if (this.speech) {
@@ -63,56 +63,138 @@ class App {
       };
     }
 
-    // 3. 슬라이더 이벤트 바인딩
-    this.bindSliderEvents();
+    // 드롭다운 외부 클릭 시 메뉴 닫고 레이어 아이콘 버튼 복귀 (지도 클릭 시 필지 선택 방지)
+    const handleOutsideClick = (e) => {
+      const dropdown = document.getElementById('map-layer-dropdown');
+      const btn = document.getElementById('btn-map-layer-menu');
+      if (dropdown && !dropdown.classList.contains('hidden')) {
+        if (!dropdown.contains(e.target) && (!btn || !btn.contains(e.target))) {
+          this.layerMenuClosedAt = Date.now();
+          dropdown.classList.add('hidden');
+          if (btn) btn.classList.remove('hidden');
+        }
+      }
+    };
+    document.addEventListener('pointerdown', handleOutsideClick, true);
+    document.addEventListener('click', handleOutsideClick, true);
 
-    // 4. 초기 기본 위치 로드 (신구대학교 본관)
-    await this.handleLocationSelect(this.lastLat, this.lastLng, false);
-
-    // 5. 2D 지적 및 공간정보 지도 초기화 (클릭으로 건물 선택 지원)
-    this.initCadastralMap();
+    // 3. 초기 기본 위치 로드 (신구대학교 부근)
+    await this.handleLocationSelect(this.lastLat, this.lastLng, false, false);
   }
 
   // ★ 2D 지도 초기화 & 클릭 리스너 연결
   initCadastralMap() {
     try {
-      this.map = new CadastralMap('map-container', (lat, lng) => {
-        this.onMapBuildingClick(lat, lng);
+      this.map = new CadastralMap('map-container', (lat, lng, shouldPan) => {
+        this.onMapParcelClick(lat, lng, shouldPan);
       });
       this.map.init(this.lastLat, this.lastLng, 18);
-      if (this.currentData && this.currentData.parcel) {
-        this.map.updateParcel(
-          this.currentData.parcel.polygon_coords,
-          this.currentData.parcel.title,
-          this.lastLat,
-          this.lastLng
-        );
-      }
     } catch (err) {
       console.warn("CadastralMap init error:", err);
     }
   }
 
-  // ★ 지도상에서 원하는 건물 클릭 시 3D 모델링 및 지적 정보 실시간 로드
-  async onMapBuildingClick(lat, lng) {
+  // ★ 지도상에서 원하는 땅 클릭 시 화면 이동 없이 바로 그 땅의 정보를 분석 및 표출
+  async onMapParcelClick(lat, lng, shouldPan = false) {
     if (isNaN(lat) || isNaN(lng)) return;
+    if (this.isLayerMenuClosing()) return;
     this.showLoading(true);
 
     try {
       if (this.map) {
-        this.map.showClickMarker(lat, lng, '📍 건물 위치 분석 중...', '공식 지적도 및 건물 좌표 스냅 중');
+        this.map.showClickMarker(lat, lng, '📍 필지 분석 중...', '토지 지적도 및 법규 연동 중');
       }
 
-      await this.handleLocationSelect(lat, lng, true);
-
-      // 사용자가 클릭한 건물의 3D 모델링을 한눈에 볼 수 있도록 3D 뷰어로 부드럽게 자동 전환
-      setTimeout(() => {
-        this.switchMainTab('3d_view');
-      }, 400);
+      // 화면 이동 없이(shouldPan = false) 데이터 분석 및 화면 갱신
+      await this.handleLocationSelect(lat, lng, true, shouldPan);
     } catch (err) {
-      console.error("Building click error:", err);
+      console.error("Parcel click error:", err);
     } finally {
       this.showLoading(false);
+    }
+  }
+
+  // ★ 연속지적도(지적선/지번/지목) ON/OFF 토글
+  toggleCadastralLayer() {
+    if (!this.map) return;
+    const isVisible = this.map.toggleCadastral();
+    const btn = document.getElementById('btn-layer-cadastral');
+    const badge = document.getElementById('cadastral-badge-status');
+    if (isVisible) {
+      if (btn) {
+        btn.className = 'w-full px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-between cursor-pointer bg-yellow-950/40 text-yellow-300 border border-yellow-500/40 hover:bg-yellow-900/50 shadow-sm';
+      }
+      if (badge) {
+        badge.textContent = 'ON';
+        badge.className = 'text-[10px] px-1.5 py-0.5 rounded font-extrabold bg-yellow-500/20 text-yellow-300 border border-yellow-400/50';
+      }
+    } else {
+      if (btn) {
+        btn.className = 'w-full px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center justify-between cursor-pointer text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 border border-slate-700/60';
+      }
+      if (badge) {
+        badge.textContent = 'OFF';
+        badge.className = 'text-[10px] px-1.5 py-0.5 rounded font-semibold bg-slate-800 text-slate-400 border border-slate-700';
+      }
+    }
+  }
+
+  // ★ 화면 우상단 지도 레이어 드롭다운 메뉴 토글 (버튼 숨기고 선택지 표출)
+  toggleMapLayerMenu(e) {
+    if (e) e.stopPropagation();
+    const btn = document.getElementById('btn-map-layer-menu');
+    const dropdown = document.getElementById('map-layer-dropdown');
+    if (dropdown) {
+      const isHidden = dropdown.classList.contains('hidden');
+      if (isHidden) {
+        dropdown.classList.remove('hidden');
+        if (btn) btn.classList.add('hidden');
+      } else {
+        dropdown.classList.add('hidden');
+        if (btn) btn.classList.remove('hidden');
+      }
+    }
+  }
+
+  // ★ 지도 레이어 유형 설정 (일반 지도 vs 위성 지도)
+  setMapLayerType(type) {
+    if (!this.map) return;
+    this.map.setMapType(type);
+
+    const btnBase = document.getElementById('btn-layer-base');
+    const btnSat = document.getElementById('btn-layer-satellite');
+    const dropdown = document.getElementById('map-layer-dropdown');
+    const btnMenu = document.getElementById('btn-map-layer-menu');
+
+    if (type === 'satellite') {
+      if (btnSat) {
+        btnSat.className = 'w-full px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 shadow-sm';
+        const satIcon = btnSat.querySelector('i');
+        if (satIcon) satIcon.className = 'fas fa-satellite text-xs text-cyan-400';
+      }
+      if (btnBase) {
+        btnBase.className = 'w-full px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer text-slate-300 hover:text-cyan-300 hover:bg-slate-800/80 border border-transparent';
+        const baseIcon = btnBase.querySelector('i');
+        if (baseIcon) baseIcon.className = 'fas fa-map text-xs text-slate-400';
+      }
+    } else {
+      if (btnBase) {
+        btnBase.className = 'w-full px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 shadow-sm';
+        const baseIcon = btnBase.querySelector('i');
+        if (baseIcon) baseIcon.className = 'fas fa-map text-xs text-cyan-400';
+      }
+      if (btnSat) {
+        btnSat.className = 'w-full px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer text-slate-300 hover:text-cyan-300 hover:bg-slate-800/80 border border-transparent';
+        const satIcon = btnSat.querySelector('i');
+        if (satIcon) satIcon.className = 'fas fa-satellite text-xs text-slate-400';
+      }
+    }
+
+    if (dropdown) {
+      dropdown.classList.add('hidden');
+    }
+    if (btnMenu) {
+      btnMenu.classList.remove('hidden');
     }
   }
 
@@ -123,12 +205,6 @@ class App {
       return;
     }
 
-    // 모바일 브라우저 보안 정책(HTTPS 필수) 체크
-    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-      alert("⚠️ [위치 권한 안내]\n스마트폰 브라우저 보안 정책상 일반 HTTP 접속 시 브라우저가 위치(GPS) 권한 팝업을 차단합니다.\n\n해결 방법 (안드로이드 크롬):\n1. 주소창에 chrome://flags 접속\n2. 'unsafely-treat-insecure-origin-as-secure' 검색\n3. Enabled로 변경 후 하단 입력란에 http://" + location.host + " 입력\n4. Relaunch(재실행) 버튼 클릭\n\n또는 HTTPS 주소로 접속해 주세요.");
-      return;
-    }
-
     this.showLoading(true);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -136,21 +212,15 @@ class App {
         const lng = pos.coords.longitude;
         if (this.map) {
           this.map.showClickMarker(lat, lng, '📍 현재 내 위치', 'GPS 위성 실시간 좌표');
-          if (this.map.map) {
-            this.map.map.setView([lat, lng], 18);
-          }
+          this.map.flyTo(lat, lng, 18);
         }
-        await this.handleLocationSelect(lat, lng, true);
+        await this.handleLocationSelect(lat, lng, true, false);
         this.showLoading(false);
       },
       (err) => {
         this.showLoading(false);
         console.warn("Geolocation error:", err);
-        if (err.code === 1) {
-          alert("위치 권한이 거부되었습니다. 브라우저 설정에서 위치 권한을 허용해 주세요.");
-        } else {
-          alert(`현재 위치를 가져올 수 없습니다: ${err.message || 'GPS 신호 불안정'}`);
-        }
+        alert(`위치를 가져올 수 없습니다: ${err.message || 'GPS 신호 불안정'}`);
       },
       {
         enableHighAccuracy: true,
@@ -160,7 +230,7 @@ class App {
     );
   }
 
-  // ★ V-World 정밀 지오코딩 주소/지번 검색
+  // ★ V-World 정밀 지오코딩 주소/지번 검색 (검색 시에는 해당 위치로 이동)
   async searchAndGoAddress() {
     const inputEl = document.getElementById('input-address-search');
     if (!inputEl) return;
@@ -184,9 +254,12 @@ class App {
         throw new Error("유효한 좌표를 파싱할 수 없습니다.");
       }
 
-      await this.handleLocationSelect(lat, lng, true);
+      if (this.map) {
+        this.map.flyTo(lat, lng, 18);
+      }
 
-      this.switchMainTab('3d_view');
+      await this.handleLocationSelect(lat, lng, true, false);
+      this.switchMainTab('map_view');
     } catch (err) {
       alert(`검색 실패: ${err.message || "주소를 확인해 주세요."}`);
     } finally {
@@ -194,7 +267,7 @@ class App {
     }
   }
 
-  async handleLocationSelect(lat, lng, showLoadingBadge = true, scanIndex = 0) {
+  async handleLocationSelect(lat, lng, showLoadingBadge = true, shouldPan = false) {
     if (isNaN(lat) || isNaN(lng)) return;
 
     if (showLoadingBadge) this.showLoading(true);
@@ -205,36 +278,17 @@ class App {
         body: JSON.stringify({
           lat,
           lng,
-          scan_index: scanIndex
+          scan_index: 0
         })
       });
       const data = await res.json();
       this.currentData = data;
       this.originalData = JSON.parse(JSON.stringify(data));
 
-      // ★ 공식 지적 및 건물 중심 좌표로 스냅된 정확한 위경도 반영
-      if (data.parcel && data.parcel.lat && data.parcel.lng) {
-        this.lastLat = Number(data.parcel.lat);
-        this.lastLng = Number(data.parcel.lng);
-      } else {
-        this.lastLat = lat;
-        this.lastLng = lng;
-      }
+      this.lastLat = lat;
+      this.lastLng = lng;
 
-      // 새로운 위치 로드 시 이전 건물 사용자 회전값 및 스케일 초기화 (기본 도로축 정렬 상태)
-      if (this.viewer) {
-        this.viewer.resetBuildingAlignment();
-      }
-
-      this.defaultMetrics = {
-        bcr: data.legal_metrics.applied_bcr,
-        far: data.legal_metrics.applied_far,
-        floor_height: data.legal_metrics.floor_height_m || 3.2,
-        floors: data.legal_metrics.estimated_floors || data.parcel.existing_floors || 4,
-        solar_setback: data.parcel.is_gis_polygon ? false : (data.legal_metrics.solar_setback?.applied ?? false)
-      };
-
-      this.updateUI(data);
+      this.updateUI(data, shouldPan);
     } catch (e) {
       console.error('Location analysis failed:', e);
     } finally {
@@ -242,87 +296,11 @@ class App {
     }
   }
 
-  // ★ 모바일 초정밀 GPS 수신
-  fetchCurrentGPSLocation(showBadge = true) {
-    if (!navigator.geolocation) {
-      this.handleLocationSelect(this.lastLat, this.lastLng, showBadge);
-      return;
-    }
-
-    if (showBadge) this.showLoading(true);
-
-    const geoOptions = {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        if (!isNaN(lat) && !isNaN(lng)) {
-          this.lastLat = lat;
-          this.lastLng = lng;
-          this.handleLocationSelect(lat, lng, showBadge);
-        }
-      },
-      (error) => {
-        console.warn('GPS position error or timeout:', error);
-        this.handleLocationSelect(this.lastLat, this.lastLng, showBadge);
-      },
-      geoOptions
-    );
-  }
-
-  // ★ 슬라이더 [기준값 복원] 기능 - 해당 건물의 실제 원본 층수/형상 1:1 완벽 복원
-  resetSlidersToDefault() {
-    if (!this.defaultMetrics || !this.originalData) return;
-
-    const sBcr = document.getElementById('slider-bcr');
-    const sFar = document.getElementById('slider-far');
-    const sH = document.getElementById('slider-floor-height');
-    const sSolar = document.getElementById('check-solar-setback');
-
-    if (sBcr) sBcr.value = this.defaultMetrics.bcr;
-    if (sFar) sFar.value = this.defaultMetrics.far;
-    if (sH) sH.value = this.defaultMetrics.floor_height;
-    if (sSolar) sSolar.checked = this.defaultMetrics.solar_setback;
-
-    const valBcr = document.getElementById('val-bcr');
-    const valFar = document.getElementById('val-far');
-    const valH = document.getElementById('val-floor-height');
-
-    if (valBcr) valBcr.textContent = `${this.defaultMetrics.bcr}%`;
-    if (valFar) valFar.textContent = `${this.defaultMetrics.far}%`;
-    if (valH) valH.textContent = `${Number(this.defaultMetrics.floor_height).toFixed(1)}m`;
-
-    // 원본 건물 데이터로 1:1 롤백
-    this.currentData = JSON.parse(JSON.stringify(this.originalData));
-    this.viewer.updateMassing(this.currentData.massing_3d, this.currentData.legal_metrics, this.lastLat, this.lastLng);
-    this.updateHUDMetrics(this.currentData.legal_metrics, this.currentData.massing_3d);
-    this.updateReportTab(this.currentData);
-  }
-
-  // ★ 건축 법규 시뮬레이션 슬라이더 패널 접기/펼치기
-  toggleSliderPanel() {
-    const contentEl = document.getElementById('slider-grid-content');
-    const iconEl = document.getElementById('slider-toggle-icon');
-    if (!contentEl) return;
-    const isHidden = contentEl.classList.contains('hidden');
-    if (isHidden) {
-      contentEl.classList.remove('hidden');
-      if (iconEl) iconEl.className = 'fas fa-chevron-down text-cyan-400 text-[10px]';
-    } else {
-      contentEl.classList.add('hidden');
-      if (iconEl) iconEl.className = 'fas fa-chevron-up text-cyan-400 text-[10px]';
-    }
-  }
-
-  // ★ 화면 뷰/카메라 위치 초기화 핸들러
+  // ★ 화면 뷰 초기화 (기본 위치 복귀)
   resetView() {
-    if (this.viewer) {
-      this.viewer.resetView();
+    if (this.map) {
+      this.map.flyTo(37.448919, 127.167702, 18);
+      this.handleLocationSelect(37.448919, 127.167702, true, false);
     }
   }
 
@@ -332,132 +310,52 @@ class App {
     }
   }
 
-  async simulateCurrentSliders() {
-    if (!this.currentData) return;
-
-    const bcr = parseFloat(document.getElementById('slider-bcr')?.value || 60);
-    const far = parseFloat(document.getElementById('slider-far')?.value || 200);
-    const floorHeight = parseFloat(document.getElementById('slider-floor-height')?.value || 3.2);
-    const solarSetback = document.getElementById('check-solar-setback')?.checked ?? (this.currentData?.parcel?.is_gis_polygon ? false : (this.currentData?.legal_metrics?.solar_setback?.applied ?? false));
-
-    const valBcr = document.getElementById('val-bcr');
-    const valFar = document.getElementById('val-far');
-    const valH = document.getElementById('val-floor-height');
-
-    if (valBcr) valBcr.textContent = `${bcr}%`;
-    if (valFar) valFar.textContent = `${far}%`;
-    if (valH) valH.textContent = `${floorHeight.toFixed(1)}m`;
-
-    try {
-      const res = await fetch('/api/simulate-custom', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          site_area_sqm: this.currentData.parcel.site_area_sqm,
-          zoning: this.currentData.legal_metrics.zoning_name,
-          custom_bcr: bcr,
-          custom_far: far,
-          floor_height_m: floorHeight,
-          apply_solar_setback: solarSetback,
-          polygon_coords: this.currentData.parcel.polygon_coords,
-          existing_floors: this.currentData.parcel.existing_floors,
-          bld_name: this.currentData.parcel.bld_name || this.currentData.parcel.title,
-          is_gis_polygon: Boolean(this.currentData.parcel.is_gis_polygon)
-        })
-      });
-      const simData = await res.json();
-      
-      this.currentData.legal_metrics = simData.legal_metrics;
-      this.currentData.massing_3d = simData.massing_3d;
-      this.currentData.ai_report = simData.ai_report;
-
-      this.viewer.updateMassing(simData.massing_3d, simData.legal_metrics, this.lastLat, this.lastLng);
-      this.updateHUDMetrics(simData.legal_metrics, simData.massing_3d);
-      this.updateReportTab(this.currentData);
-    } catch (e) {
-      console.error('Simulation error:', e);
-    }
-  }
-
-  updateUI(data) {
+  updateUI(data, shouldPan = false) {
     const { parcel, legal_metrics, massing_3d, ai_report } = data;
 
     const titleEl = document.getElementById('hud-parcel-title');
     const addrEl = document.getElementById('hud-parcel-address');
-    if (titleEl) titleEl.textContent = parcel.title || '현재 위치 지적 필지';
+    if (titleEl) titleEl.textContent = parcel.title || '선택된 지적 필지';
     if (addrEl) addrEl.textContent = parcel.address || '실시간 위치 파싱 중...';
     
     const zoningEl = document.getElementById('badge-zoning');
     const jimokEl = document.getElementById('badge-jimok');
     const areaEl = document.getElementById('badge-area');
-    const gisBadge = document.getElementById('badge-gis');
 
     if (zoningEl) zoningEl.textContent = legal_metrics.zoning_name || '제2종일반주거지역';
-    if (jimokEl) jimokEl.textContent = parcel.jimok || parcel.land_use || '대지 (대)';
+    const cleanJimok = (parcel.jimok && parcel.jimok !== '-' && parcel.jimok.trim() !== '') ? parcel.jimok : (parcel.land_use || '대지 (대)');
+    if (jimokEl) jimokEl.textContent = cleanJimok;
     if (areaEl) areaEl.textContent = `${(parcel.site_area_sqm || 0).toLocaleString()} ㎡`;
 
-    if (gisBadge) {
-      if (parcel.is_gis_polygon) {
-        const ptCount = (parcel.polygon_coords && parcel.polygon_coords.length > 1) ? (parcel.polygon_coords.length - 1) : (parcel.polygon_coords?.length || 0);
-        gisBadge.innerHTML = `<i class="fas fa-draw-polygon text-purple-400"></i> 실측 GIS ${ptCount}각 모델`;
-        gisBadge.classList.remove('hidden');
-      } else {
-        gisBadge.classList.add('hidden');
-      }
-    }
-
-    const sliderBcr = document.getElementById('slider-bcr');
-    const valBcr = document.getElementById('val-bcr');
-    const defBcrBadge = document.getElementById('default-bcr-badge');
-
-    if (sliderBcr) sliderBcr.value = legal_metrics.applied_bcr;
-    if (valBcr) valBcr.textContent = `${legal_metrics.applied_bcr}%`;
-    if (defBcrBadge) defBcrBadge.textContent = `(기준 ${this.defaultMetrics?.bcr || legal_metrics.applied_bcr}%)`;
-
-    const sliderFar = document.getElementById('slider-far');
-    const valFar = document.getElementById('val-far');
-    const defFarBadge = document.getElementById('default-far-badge');
-
-    if (sliderFar) sliderFar.value = legal_metrics.applied_far;
-    if (valFar) valFar.textContent = `${legal_metrics.applied_far}%`;
-    if (defFarBadge) defFarBadge.textContent = `(기준 ${this.defaultMetrics?.far || legal_metrics.applied_far}%)`;
-
-    const sliderH = document.getElementById('slider-floor-height');
-    const valH = document.getElementById('val-floor-height');
-    if (sliderH) sliderH.value = legal_metrics.floor_height_m || 3.2;
-    if (valH) valH.textContent = `${(legal_metrics.floor_height_m || 3.2).toFixed(1)}m`;
-
-    const checkSolar = document.getElementById('check-solar-setback');
-    if (checkSolar) checkSolar.checked = parcel.is_gis_polygon ? false : legal_metrics.solar_setback.applied;
-
-    const rotSlider = document.getElementById('building-rot-slider');
-    const rotVal = document.getElementById('building-rot-val');
-    if (rotSlider) rotSlider.value = this.viewer?.userRotationDeg || 0;
-    if (rotVal) rotVal.textContent = `${(this.viewer?.userRotationDeg || 0) >= 0 ? '+' : ''}${(this.viewer?.userRotationDeg || 0).toFixed(1)}°`;
-
     this.updateHUDMetrics(legal_metrics, massing_3d);
-    // ★ 3D 뷰어 바닥에 실제 2D 공간 지도 연동 (lat, lng) 좌표 직접 전달
-    this.viewer.updateMassing(massing_3d, legal_metrics, this.lastLat, this.lastLng);
 
-    // ★ 2D 지도에도 현재 선택된 건물의 필지 및 마커 동기화
+    // ★ 2D 지도에 선택된 땅의 경계 폴리곤 및 마커 즉시 업데이트 (화면 강제 이동 없음)
     if (this.map && parcel) {
-      this.map.updateParcel(parcel.polygon_coords, parcel.title, this.lastLat, this.lastLng);
+      this.map.updateParcel(
+        parcel.polygon_coords,
+        parcel.title,
+        this.lastLat,
+        this.lastLng,
+        shouldPan,
+        parcel
+      );
     }
 
     this.updateReportTab(data);
   }
 
   updateHUDMetrics(legal, massing) {
-    const bld = massing.massing_building;
-    const fEl = document.getElementById('metric-floors');
-    const hEl = document.getElementById('metric-height');
-    const baEl = document.getElementById('metric-bld-area');
-    const gaEl = document.getElementById('metric-gross-area');
+    const bcrEl = document.getElementById('metric-bcr');
+    const farEl = document.getElementById('metric-far');
 
-    if (fEl) fEl.textContent = `${bld.floors_count}F`;
-    if (hEl) hEl.textContent = `${bld.total_height_m}m`;
-    if (baEl) baEl.textContent = `${Math.round(bld.max_building_area_sqm).toLocaleString()}㎡`;
-    if (gaEl) gaEl.textContent = `${Math.round(bld.max_floor_area_sqm).toLocaleString()}㎡`;
+    if (legal) {
+      if (bcrEl && legal.applied_bcr !== undefined) {
+        bcrEl.textContent = `${legal.applied_bcr}%`;
+      }
+      if (farEl && legal.applied_far !== undefined) {
+        farEl.textContent = `${legal.applied_far}%`;
+      }
+    }
   }
 
   updateReportTab(data) {
@@ -497,75 +395,50 @@ class App {
     if (ttsPrev) ttsPrev.textContent = ai_report.tts_script;
   }
 
-  bindSliderEvents() {
-    const onSliderInput = () => {
-      clearTimeout(this.sliderTimer);
-      this.sliderTimer = setTimeout(() => this.simulateCurrentSliders(), 50);
-    };
-
-    const sBcr = document.getElementById('slider-bcr');
-    const sFar = document.getElementById('slider-far');
-    const sH = document.getElementById('slider-floor-height');
-    const sSolar = document.getElementById('check-solar-setback');
-
-    if (sBcr) sBcr.addEventListener('input', onSliderInput);
-    if (sFar) sFar.addEventListener('input', onSliderInput);
-    if (sH) sH.addEventListener('input', onSliderInput);
-    if (sSolar) sSolar.addEventListener('change', () => this.simulateCurrentSliders());
+  // ★ 법규 리포트 토글 (지도 뷰 <-> 리포트 오버레이)
+  toggleReportView() {
+    const nextTab = this.activeTab === 'report' ? 'map_view' : 'report';
+    this.switchMainTab(nextTab);
   }
 
   switchMainTab(tab) {
     this.activeTab = tab;
 
-    const tabBtns = document.querySelectorAll('.main-tab-btn');
-    tabBtns.forEach(btn => {
-      if (btn.dataset.tab === tab) {
-        btn.className = 'main-tab-btn px-3 py-1.5 rounded-md text-xs font-bold transition-all bg-cyan-500/20 border border-cyan-400 text-cyan-300 cursor-pointer shadow-sm';
-      } else {
-        btn.className = 'main-tab-btn px-3 py-1.5 rounded-md text-xs font-medium text-slate-400 transition-all border border-transparent hover:text-cyan-300 cursor-pointer';
-      }
-    });
-
-    const arContainer = document.getElementById('ar-container');
-    const mapContainer = document.getElementById('map-container');
+    const reportBtn = document.getElementById('main-tab-report');
     const reportContainer = document.getElementById('report-container');
+    const mapLayerContainer = document.getElementById('map-layer-container');
+    const btnMenu = document.getElementById('btn-map-layer-menu');
+    const dropdown = document.getElementById('map-layer-dropdown');
 
-    if (arContainer) {
-      arContainer.classList.add('hidden');
-      arContainer.style.display = 'none';
-    }
-    if (mapContainer) {
-      mapContainer.classList.add('hidden');
-      mapContainer.style.display = 'none';
-    }
-    if (reportContainer) {
-      reportContainer.classList.add('hidden');
-      reportContainer.style.display = 'none';
-    }
-
-    if (tab === '3d_view' && arContainer) {
-      arContainer.classList.remove('hidden');
-      arContainer.style.display = 'block';
-      if (this.viewer) {
-        this.viewer.onWindowResize();
+    if (tab === 'map_view') {
+      if (reportBtn) {
+        reportBtn.className = 'px-3 py-1.5 rounded-lg glass-panel border border-cyan-500/40 hover:border-cyan-400 bg-slate-900/90 hover:bg-cyan-950/80 text-cyan-300 font-bold text-xs shadow-md flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0';
       }
-    } else if (tab === 'map_view' && mapContainer) {
-      mapContainer.classList.remove('hidden');
-      mapContainer.style.display = 'block';
+      if (reportContainer) {
+        reportContainer.classList.add('hidden');
+      }
+      if (mapLayerContainer) {
+        mapLayerContainer.classList.remove('hidden');
+      }
+      if (btnMenu) {
+        btnMenu.classList.remove('hidden');
+      }
+      if (dropdown) {
+        dropdown.classList.add('hidden');
+      }
       if (this.map) {
         this.map.resize();
-        if (this.currentData?.parcel?.polygon_coords) {
-          this.map.updateParcel(
-            this.currentData.parcel.polygon_coords,
-            this.currentData.parcel.title,
-            this.lastLat,
-            this.lastLng
-          );
-        }
       }
-    } else if (tab === 'report' && reportContainer) {
-      reportContainer.classList.remove('hidden');
-      reportContainer.style.display = 'block';
+    } else if (tab === 'report') {
+      if (reportBtn) {
+        reportBtn.className = 'px-3 py-1.5 rounded-lg glass-panel border border-cyan-400 bg-cyan-500/20 text-cyan-200 font-bold text-xs shadow-md flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0';
+      }
+      if (reportContainer) {
+        reportContainer.classList.remove('hidden');
+      }
+      if (mapLayerContainer) {
+        mapLayerContainer.classList.add('hidden');
+      }
       if (this.currentData) {
         this.updateReportTab(this.currentData);
       }

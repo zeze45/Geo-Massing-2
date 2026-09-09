@@ -31,9 +31,7 @@ def generate_ai_briefing(parcel_data: Dict[str, Any], legal_metrics: Dict[str, A
 
     # 1. 음성 낭독용 TTS 스크립트
     tts_script = (
-        f"지적 공간정보 및 법규 분석 결과입니다. "
         f"본 필지는 {address}에 위치하며, 지목은 {jimok}, 용도지역은 {zoning}입니다. "
-        f"현재 건축물대장상 현존 건물은 지상 {existing_floors}층이나, "
         f"법정 용적률 {far:,.0f}퍼센트를 적용하여 신축할 경우 지상 최대 {floors}층, 약 {gross_area:,.0f}제곱미터 규모의 가상 건축 볼륨이 가능합니다."
     )
 
@@ -45,12 +43,11 @@ def generate_ai_briefing(parcel_data: Dict[str, Any], legal_metrics: Dict[str, A
     # 2. 화면 표시용 상세 보고서 마크다운 & 요약
     report_sections = [
         {
-            "category": "📍 지적 및 건물 현황 (실시간 필지)",
+            "category": "📍 지적 및 토지 현황 (실시간 필지)",
             "items": [
                 {"label": "정밀 지번주소", "value": address},
                 {"label": "지목", "value": jimok},
                 {"label": "대지면적", "value": f"{site_area:,.1f} ㎡ (약 {site_area * 0.3025:,.1f} 평)"},
-                {"label": "현존 건물 (대장)", "value": f"지상 {existing_floors} 층"},
                 {"label": "용도지역", "value": f"{zoning} ({category})"}
             ]
         },
@@ -75,7 +72,7 @@ def generate_ai_briefing(parcel_data: Dict[str, Any], legal_metrics: Dict[str, A
     ]
 
     ai_evaluation = (
-        f"본 필지는 {address} ({zoning}) 소재 필지로, 현재 건축물대장상 지상 {existing_floors}층 건물 부지입니다. "
+        f"본 필지는 {address} ({zoning}) 소재 필지입니다. "
         f"국토계획법상 건폐율 {bcr}%와 용적률 {far}%를 적용한 신축 개발 시 지상 최대 {floors}층 규모의 개발 가치가 산출됩니다."
     )
 
@@ -90,7 +87,6 @@ def generate_ai_briefing(parcel_data: Dict[str, Any], legal_metrics: Dict[str, A
             "bcr": bcr,
             "far": far,
             "floors": floors,
-            "existing_floors": existing_floors,
             "height_m": height_m,
             "bld_area": bld_area,
             "gross_area": gross_area

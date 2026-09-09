@@ -50,25 +50,15 @@ html, body {
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
 }
 
-/* 3D 뷰포트 및 캔버스 */
-#ar-container {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  z-index: 1;
-}
-
+/* 지도 및 뷰포트 */
 #map-container {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 10;
-  background-color: #0f172a;
+  z-index: 0;
+  background-color: #0b1120;
 }
 
 #report-container {
@@ -77,24 +67,23 @@ html, body {
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 10;
-  background-color: #090d16;
+  z-index: 20;
+  background-color: rgba(9, 13, 22, 0.96);
 }
 
-#three-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 2;
-  touch-action: none;
-  pointer-events: auto;
-  cursor: grab;
+/* Leaflet 팝업 다크 글래스 커스텀 */
+.leaflet-popup-content-wrapper {
+  background: rgba(13, 22, 38, 0.92) !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(0, 240, 255, 0.4) !important;
+  border-radius: 12px !important;
+  backdrop-filter: blur(12px) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 240, 255, 0.2) !important;
 }
 
-#three-canvas:active {
-  cursor: grabbing;
+.leaflet-popup-tip {
+  background: rgba(13, 22, 38, 0.92) !important;
+  border: 1px solid rgba(0, 240, 255, 0.4) !important;
 }
 
 /* 음성 파형 애니메이션 */
@@ -117,24 +106,131 @@ html, body {
   50% { height: 26px; background-color: var(--neon-green); }
 }
 
-/* 슬라이더 커스텀 (모바일 공간 확보 및 콤팩트 최적화) */
-input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  background: rgba(255, 255, 255, 0.15);
-  height: 4px;
-  border-radius: 2px;
-  outline: none;
+/* 클릭한 지점 바로 위에 뜨는 지번 배지 라벨 */
+.parcel-center-jibun-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1.8px solid #facc15;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.8), 0 0 12px rgba(250, 204, 21, 0.45);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 9px;
+  white-space: nowrap;
+  position: relative;
+  transform: translate(-50%, -100%) translateY(-18px);
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+  z-index: 500;
 }
 
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--neon-cyan);
-  cursor: pointer;
-  box-shadow: 0 0 6px var(--neon-cyan);
-  border: 1.5px solid #ffffff;
+.parcel-center-jibun-badge::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 6px 5px 0 5px;
+  border-style: solid;
+  border-color: #facc15 transparent transparent transparent;
+  display: block;
+  width: 0;
+  height: 0;
 }
+
+.jibun-badge-title {
+  color: #fef08a;
+  font-family: 'Rajdhani', -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.jibun-badge-jimok {
+  background: #eab308;
+  color: #090d16;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1.2;
+}
+
+/* Leaflet 우측 하단 컨트롤 컨테이너 (내 위치 & 줌 버튼을 AI 브리핑 버튼 위에 배치) */
+.leaflet-bottom.leaflet-right {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  justify-content: flex-end !important;
+  pointer-events: none !important;
+  margin-bottom: 58px !important;
+  margin-right: 14px !important;
+}
+
+/* Leaflet 내 위치 (GPS) 커스텀 버튼 (줌 컨트롤 상단 배치) */
+.leaflet-control-custom-locate {
+  order: 1 !important;
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  border: 1px solid rgba(0, 240, 255, 0.4) !important;
+  background: rgba(15, 23, 42, 0.9) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 10px !important;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+  margin: 0 0 8px 0 !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto !important;
+  transition: all 0.2s ease;
+  color: #38bdf8;
+}
+
+.leaflet-control-custom-locate:hover {
+  background: rgba(0, 240, 255, 0.25) !important;
+  border-color: rgba(0, 240, 255, 0.8) !important;
+  color: #ffffff !important;
+  transform: scale(1.08);
+}
+
+.leaflet-control-custom-locate:active {
+  transform: scale(0.95);
+}
+
+/* Leaflet 줌 컨트롤 우측 하단 글래스 스타일 (내 위치 버튼 아래 배치) */
+.leaflet-bottom.leaflet-right .leaflet-control-zoom {
+  order: 2 !important;
+  border: 1px solid rgba(0, 240, 255, 0.35) !important;
+  background: rgba(15, 23, 42, 0.88) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+  margin: 0 !important;
+  pointer-events: auto !important;
+}
+
+.leaflet-control-zoom a {
+  background: transparent !important;
+  color: #38bdf8 !important;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.5) !important;
+  font-weight: bold;
+}
+
+.leaflet-control-zoom a:hover {
+  background: rgba(0, 240, 255, 0.18) !important;
+  color: #ffffff !important;
+}
+
+
